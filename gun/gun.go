@@ -1,21 +1,12 @@
 package gun
 
-type Gun struct{
-
+type Gun struct {
 }
 
-type Config struct{
-
-}
-
-func NewGun(cfg *Config) *Gun{
+func NewGun() *Gun {
 	return &Gun{}
 }
 
-func (g *Gun) Prepare() error{
-	return nil
-}
-
-func (g *Gun) Run() error{
+func (g *Gun) Run() error {
 	return nil
 }
