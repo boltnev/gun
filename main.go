@@ -55,6 +55,20 @@ func Run(thread int, wgReady *sync.WaitGroup, wgDone *sync.WaitGroup, ctx contex
 	tr := &http.Transport{
 		MaxIdleConnsPerHost: 1024,
 		TLSHandshakeTimeout: 0 * time.Second,
+		// DialContext: func(ctx context.Context, network string, addr string) (net.Conn, error) {
+		// 	conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		// 	if err != nil {
+		// 		return conn, err
+		// 	}
+		// 	switch tcp := conn.(type) {
+		// 	case *net.TCPConn:
+		// 		err = tcp.SetNoDelay(true)
+		// 		if err != nil {
+		// 			return conn, err
+		// 		}
+		// 	}
+		// 	return conn, err
+		// },
 	}
 	client := http.Client{Transport: tr}
 	fmt.Printf("thread %d is ready\n", thread)
