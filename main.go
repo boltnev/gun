@@ -4,9 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -50,7 +52,11 @@ type Result struct {
 }
 
 func Run(thread int, wgReady *sync.WaitGroup, wgDone *sync.WaitGroup, ctx context.Context, requests <-chan *http.Request, results chan<- Result) {
-	client := http.Client{}
+	tr := &http.Transport{
+		MaxIdleConnsPerHost: 1024,
+		TLSHandshakeTimeout: 0 * time.Second,
+	}
+	client := http.Client{Transport: tr}
 	fmt.Printf("thread %d is ready\n", thread)
 	wgReady.Done()
 	defer wgDone.Done()
@@ -63,6 +69,7 @@ out:
 		if response != nil {
 			statusCode = response.StatusCode
 			if response.Body != nil {
+				io.Copy(io.Discard, response.Body)
 				response.Body.Close()
 			}
 		}
@@ -140,6 +147,7 @@ func main() {
 	fmt.Printf("duration: %s\n", duration)
 	fmt.Printf("timeout: %s\n", timeout)
 	fmt.Printf("url: %s\n", initialUrl)
+	runtime.GOMAXPROCS(4)
 
 	requests := make(chan *http.Request)
 	results := make(chan Result, ResultBufferSize)
