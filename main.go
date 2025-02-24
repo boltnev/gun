@@ -16,8 +16,7 @@ var timeout time.Duration
 var duration time.Duration
 var initialUrl string
 
-const ResultBufferSize = 1024 * 1024
-const RequestBufferSize = 1024 * 1024
+const ResultBufferSize = 1024 * 1024 * 20
 
 func init() {
 	flag.IntVar(&concurrency, "c", 1, "concurrency threads")
@@ -63,6 +62,9 @@ out:
 		statusCode := 0
 		if response != nil {
 			statusCode = response.StatusCode
+			if response.Body != nil {
+				response.Body.Close()
+			}
 		}
 		results <- Result{
 			Latency:    time.Since(start),
