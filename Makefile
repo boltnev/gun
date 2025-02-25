@@ -1,3 +1,3 @@
 build:
 	mkdir -p bin
-	go build -o bin/gun main.go
+	go build -o bin/gun *.go
