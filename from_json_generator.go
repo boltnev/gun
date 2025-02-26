@@ -49,8 +49,6 @@ func (gen *FromJsonGenerator) GenerateRequests(ctx context.Context, requests cha
 out:
 	for {
 		randomReq := gen.sourceRequests[rand.Int()%len(gen.sourceRequests)]
-		reqCtx, cancel := context.WithTimeout(ctx, gen.baseRequest.MaxDuration)
-		defer cancel()
 		newUrl := parsedUrl
 		method := gen.baseRequest.Method
 		body := bytes.NewBuffer([]byte(gen.baseRequest.Body))
@@ -68,8 +66,7 @@ out:
 			body = bytes.NewBuffer([]byte(randomReq.Body))
 		}
 		// fmt.Printf("generated: %s, %s, %d\n", method, newUrl.String(), len(randomReq.Body))
-		req, err := http.NewRequestWithContext(
-			reqCtx,
+		req, err := http.NewRequest(
 			method,
 			newUrl.String(),
 			body,

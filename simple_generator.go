@@ -26,12 +26,7 @@ func (gen *SimpleRequestGenerator) GenerateRequests(ctx context.Context, request
 	}
 out:
 	for {
-		reqCtx, cancel := context.WithTimeout(ctx, gen.baseRequest.MaxDuration)
-
-		defer cancel()
-
-		req, err := http.NewRequestWithContext(
-			reqCtx,
+		req, err := http.NewRequest(
 			gen.baseRequest.Method,
 			parsedUrl.String(),
 			nil,

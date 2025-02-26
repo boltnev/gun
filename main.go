@@ -7,7 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 	"time"
 )
@@ -18,6 +20,9 @@ var duration time.Duration
 var initialUrl string
 var fromJson string
 var maxproc int
+
+var cpuprofile string
+var memprofile string
 
 const ResultBufferSize = 1024 * 1024 * 20
 
@@ -36,6 +41,9 @@ func init() {
 
 	flag.StringVar(&fromJson, "from_json", "", "take requests from json")
 	flag.IntVar(&maxproc, "maxproc", 0, "GOMAXPROC runtime setting")
+
+	flag.StringVar(&cpuprofile, "cpuprofile", "", "cpuprofile filepath")
+	flag.StringVar(&memprofile, "memprofile", "", "memprofile filepath; writing memprofile in the middle of the test")
 
 	flag.Parse()
 }
@@ -82,7 +90,9 @@ func Run(thread int, wgReady *sync.WaitGroup, wgDone *sync.WaitGroup, ctx contex
 out:
 	for req := range requests {
 		start := time.Now()
-		response, err := client.Do(req)
+		reqCtx, cancel := context.WithTimeout(ctx, timeout)
+		response, err := client.Do(req.WithContext(reqCtx))
+		cancel()
 		statusCode := 0
 		if response != nil {
 			statusCode = response.StatusCode
@@ -170,6 +180,26 @@ func main() {
 			Method:      http.MethodGet,
 			MaxDuration: timeout,
 		})
+	}
+	if cpuprofile != "" {
+		f, err := os.Create(cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+	if memprofile != "" {
+		go func() {
+			time.Sleep(duration / 2)
+			fmt.Println("writing memprofile")
+			f, err := os.Create(memprofile)
+			if err != nil {
+				log.Fatal(err)
+			}
+			pprof.WriteHeapProfile(f)
+
+		}()
 	}
 	if maxproc > 0 {
 		fmt.Printf("max proc: %d\n", maxproc)
