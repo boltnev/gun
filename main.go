@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -75,56 +73,6 @@ type Result struct {
 	err        error
 }
 
-func Run(thread int, wgReady *sync.WaitGroup, wgDone *sync.WaitGroup, ctx context.Context, requests <-chan *Request, results chan<- Result) {
-	tr := &http.Transport{
-		MaxIdleConnsPerHost: 1024,
-		TLSHandshakeTimeout: 0 * time.Second,
-	}
-	client := http.Client{Transport: tr}
-	fmt.Printf("thread %d is ready\n", thread)
-	wgReady.Done()
-	defer wgDone.Done()
-
-out:
-	for req := range requests {
-		start := time.Now()
-		reqCtx, cancel := context.WithTimeout(ctx, timeout)
-		if req.Url == nil {
-			log.Fatalf("wrong request without url: %s", req.UrlRaw)
-		}
-		httpReq, err := http.NewRequestWithContext(
-			reqCtx,
-			req.Method,
-			req.Url.String(),
-			bytes.NewBuffer([]byte(req.Body)),
-		)
-		if err != nil {
-			log.Fatalf("could not create request: %s", err)
-		}
-
-		response, err := client.Do(httpReq)
-		statusCode := 0
-		if response != nil {
-			statusCode = response.StatusCode
-			if response.Body != nil {
-				io.Copy(io.Discard, response.Body)
-				response.Body.Close()
-			}
-		}
-		cancel()
-		results <- Result{
-			Latency:    time.Since(start),
-			StatusCode: statusCode,
-			err:        err,
-		}
-		select {
-		case <-ctx.Done():
-			break out
-		default:
-		}
-	}
-}
-
 func Collect(wg *sync.WaitGroup, results <-chan Result) {
 	defer wg.Done()
 	var totalDuration time.Duration = 0
@@ -164,6 +112,10 @@ func Collect(wg *sync.WaitGroup, results <-chan Result) {
 	fmt.Printf("avg duration: %s\n", totalDuration/time.Duration(totalResponses))
 }
 
+type Runner interface {
+	Run(ctx context.Context, wgDone *sync.WaitGroup, requests <-chan *Request, results chan<- Result)
+}
+
 type RequestGenerator interface {
 	GenerateRequests(ctx context.Context, requests chan<- *Request)
 }
@@ -173,6 +125,7 @@ func main() {
 	fmt.Printf("duration: %s\n", duration)
 	fmt.Printf("timeout: %s\n", timeout)
 	fmt.Printf("url: %s\n", initialUrlRaw)
+	var runners []Runner
 	var generator RequestGenerator
 	var err error
 	if fromJson != "" {
@@ -226,12 +179,16 @@ func main() {
 
 	// runners
 	wg.Add(concurrency)
-	wgDone.Add(concurrency)
 
 	for threadNum := range concurrency {
-		go Run(threadNum, &wg, &wgDone, ctx, requests, results)
+		runners = append(runners, NewHttpRunner(threadNum, &wg))
 	}
 	wg.Wait()
+
+	wgDone.Add(concurrency)
+	for _, runner := range runners {
+		go runner.Run(ctx, &wgDone, requests, results)
+	}
 
 	wg.Add(1)
 	// Collect and display
@@ -242,7 +199,6 @@ func main() {
 		if ctx.Err() == nil {
 			cancel()
 		}
-
 	}()
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
