@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
-	"net/http"
 	"net/url"
 	"os"
 )
@@ -31,6 +29,19 @@ func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJson
 		return nil, err
 	}
 	fmt.Printf("%d loaded from %s\n", len(requestsFromJson), sourceFilePath)
+	for i, req := range requestsFromJson {
+		requestsFromJson[i].Url = baseRequest.Url
+		if req.UrlRaw != "" {
+			url, err := url.Parse(req.UrlRaw)
+			if err != nil {
+				log.Fatalf("wrong url from json file: position %d, %s", i, req.UrlRaw)
+			}
+			requestsFromJson[i].Url = url
+		}
+		if req.Path != "" {
+			requestsFromJson[i].Url.Path = req.Path
+		}
+	}
 
 	return &FromJsonGenerator{
 		baseRequest:    baseRequest,
@@ -38,50 +49,13 @@ func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJson
 	}, nil
 }
 
-func (gen *FromJsonGenerator) GenerateRequests(ctx context.Context, requests chan<- *http.Request) {
+func (gen *FromJsonGenerator) GenerateRequests(ctx context.Context, requests chan<- *Request) {
 	defer close(requests)
-	baseUrl := gen.baseRequest.Url
-	parsedUrl, err := url.Parse(baseUrl)
-	if err != nil {
-		log.Fatalf("url is not valid: %s", parsedUrl)
-	}
-
 out:
 	for {
 		randomReq := gen.sourceRequests[rand.Int()%len(gen.sourceRequests)]
-		newUrl := parsedUrl
-		method := gen.baseRequest.Method
-		body := bytes.NewBuffer([]byte(gen.baseRequest.Body))
-		if randomReq.Url != "" {
-			// TODO: check url validity on init
-			method = randomReq.Url
-		}
-		if randomReq.Path != "" {
-			newUrl.Path = randomReq.Path
-		}
-		if randomReq.Method != "" {
-			method = randomReq.Method
-		}
-		if randomReq.Body != "" {
-			body = bytes.NewBuffer([]byte(randomReq.Body))
-		}
-		// fmt.Printf("generated: %s, %s, %d\n", method, newUrl.String(), len(randomReq.Body))
-		req, err := http.NewRequest(
-			method,
-			newUrl.String(),
-			body,
-		)
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				break out
-			default:
-				log.Fatalf("could not create request: %s", err)
-			}
-			break
-		}
 		select {
-		case requests <- req:
+		case requests <- &randomReq:
 		case <-ctx.Done():
 			break out
 		}

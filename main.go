@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -17,7 +19,8 @@ import (
 var concurrency int
 var timeout time.Duration
 var duration time.Duration
-var initialUrl string
+var initialUrlRaw string
+var initialUrl *url.URL
 var fromJson string
 var maxproc int
 
@@ -36,8 +39,8 @@ func init() {
 	flag.DurationVar(&duration, "d", time.Minute, "test duration")
 	flag.DurationVar(&duration, "duration", time.Minute, "test duration")
 
-	flag.StringVar(&initialUrl, "u", "http://localhost", "url to reqest")
-	flag.StringVar(&initialUrl, "url", "http://localhost", "url to request")
+	flag.StringVar(&initialUrlRaw, "u", "http://localhost", "url to reqest")
+	flag.StringVar(&initialUrlRaw, "url", "http://localhost", "url to request")
 
 	flag.StringVar(&fromJson, "from_json", "", "take requests from json")
 	flag.IntVar(&maxproc, "maxproc", 0, "GOMAXPROC runtime setting")
@@ -46,15 +49,22 @@ func init() {
 	flag.StringVar(&memprofile, "memprofile", "", "memprofile filepath; writing memprofile in the middle of the test")
 
 	flag.Parse()
+	var err error
+	initialUrl, err = url.Parse(initialUrlRaw)
+	if err != nil {
+		log.Fatal("bad url: %s", initialUrl)
+	}
 }
 
 type Request struct {
-	Url         string        `json:"url"`
-	Path        string        `json:"path"`
-	Host        string        `json:"host"`
-	Method      string        `json:"method"`
-	Body        string        `json:"body"`
+	UrlRaw string `json:"url,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Host   string `json:"host,omitempty"`
+	Method string `json:"method,omitempty"`
+	Body   string `json:"body,omitempty"`
+
 	MaxDuration time.Duration `json:"-"`
+	Url         *url.URL      `json:"-"`
 }
 
 type Result struct {
@@ -63,24 +73,10 @@ type Result struct {
 	err        error
 }
 
-func Run(thread int, wgReady *sync.WaitGroup, wgDone *sync.WaitGroup, ctx context.Context, requests <-chan *http.Request, results chan<- Result) {
+func Run(thread int, wgReady *sync.WaitGroup, wgDone *sync.WaitGroup, ctx context.Context, requests <-chan *Request, results chan<- Result) {
 	tr := &http.Transport{
 		MaxIdleConnsPerHost: 1024,
 		TLSHandshakeTimeout: 0 * time.Second,
-		// DialContext: func(ctx context.Context, network string, addr string) (net.Conn, error) {
-		// 	conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
-		// 	if err != nil {
-		// 		return conn, err
-		// 	}
-		// 	switch tcp := conn.(type) {
-		// 	case *net.TCPConn:
-		// 		err = tcp.SetNoDelay(true)
-		// 		if err != nil {
-		// 			return conn, err
-		// 		}
-		// 	}
-		// 	return conn, err
-		// },
 	}
 	client := http.Client{Transport: tr}
 	fmt.Printf("thread %d is ready\n", thread)
@@ -91,8 +87,20 @@ out:
 	for req := range requests {
 		start := time.Now()
 		reqCtx, cancel := context.WithTimeout(ctx, timeout)
-		response, err := client.Do(req.WithContext(reqCtx))
+		if req.Url == nil {
+			log.Fatalf("wrong request without url: %s", req.UrlRaw)
+		}
+		httpReq, err := http.NewRequestWithContext(
+			reqCtx,
+			req.Method,
+			req.Url.String(),
+			bytes.NewBuffer([]byte(req.Body)),
+		)
+		if err != nil {
+			log.Fatalf("could not create request: %s", err)
+		}
 
+		response, err := client.Do(httpReq)
 		statusCode := 0
 		if response != nil {
 			statusCode = response.StatusCode
@@ -145,10 +153,9 @@ func Collect(wg *sync.WaitGroup, results <-chan Result) {
 	}
 
 	fmt.Printf("test ended: %s\n", time.Now())
-
-	fmt.Printf("status stat:")
+	fmt.Printf("http status stats:\n")
 	for status, count := range statusMap {
-		fmt.Printf("> status: %d count %d\n", status, count)
+		fmt.Printf(">>> status: %d count %d\n", status, count)
 	}
 	fmt.Printf("responses total: %d\n", totalResponses)
 	fmt.Printf("avg rps: %f\n", float64(totalResponses)/time.Since(testStart).Seconds())
@@ -156,14 +163,14 @@ func Collect(wg *sync.WaitGroup, results <-chan Result) {
 }
 
 type RequestGenerator interface {
-	GenerateRequests(ctx context.Context, requests chan<- *http.Request)
+	GenerateRequests(ctx context.Context, requests chan<- *Request)
 }
 
 func main() {
 	fmt.Printf("concurrency: %d\n", concurrency)
 	fmt.Printf("duration: %s\n", duration)
 	fmt.Printf("timeout: %s\n", timeout)
-	fmt.Printf("url: %s\n", initialUrl)
+	fmt.Printf("url: %s\n", initialUrlRaw)
 	var generator RequestGenerator
 	var err error
 	if fromJson != "" {
@@ -207,7 +214,7 @@ func main() {
 		runtime.GOMAXPROCS(maxproc)
 	}
 
-	requests := make(chan *http.Request)
+	requests := make(chan *Request)
 	results := make(chan Result, ResultBufferSize)
 	ctx, cancel := context.WithTimeout(context.Background(), duration+timeout)
 	defer cancel()

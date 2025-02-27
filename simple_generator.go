@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
-	"net/http"
-	"net/url"
 )
 
 type SimpleRequestGenerator struct {
@@ -18,30 +15,11 @@ func NewSimpleRequestGenerator(baseRequest Request) *SimpleRequestGenerator {
 	}
 }
 
-func (gen *SimpleRequestGenerator) GenerateRequests(ctx context.Context, requests chan<- *http.Request) {
-	baseUrl := gen.baseRequest.Url
-	parsedUrl, err := url.Parse(baseUrl)
-	if err != nil {
-		log.Fatalf("url is not valid: %s", parsedUrl)
-	}
+func (gen *SimpleRequestGenerator) GenerateRequests(ctx context.Context, requests chan<- *Request) {
 out:
 	for {
-		req, err := http.NewRequest(
-			gen.baseRequest.Method,
-			parsedUrl.String(),
-			nil,
-		)
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				break out
-			default:
-				log.Fatalf("could not create request: %s", err)
-			}
-			break
-		}
 		select {
-		case requests <- req:
+		case requests <- &gen.baseRequest:
 		case <-ctx.Done():
 			break out
 		}
