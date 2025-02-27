@@ -16,8 +16,6 @@ type FromJsonGenerator struct {
 	// logger etc
 }
 
-type Requests = []Request
-
 func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJsonGenerator, error) {
 	requestsFromJson := Requests{}
 	sourceBytes, err := os.ReadFile(sourceFilePath)

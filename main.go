@@ -23,11 +23,17 @@ var initialUrlRaw string
 var initialUrl *url.URL
 var fromJson string
 var maxproc int
+var loadType string
 
 var cpuprofile string
 var memprofile string
 
 const ResultBufferSize = 1024 * 1024 * 20
+
+const (
+	LoadTypeHTTP   = "http"
+	LoadTypeQdrant = "qdrant"
+)
 
 func init() {
 	flag.IntVar(&concurrency, "c", 1, "concurrency threads")
@@ -48,11 +54,23 @@ func init() {
 	flag.StringVar(&cpuprofile, "cpuprofile", "", "cpuprofile filepath")
 	flag.StringVar(&memprofile, "memprofile", "", "memprofile filepath; writing memprofile in the middle of the test")
 
+	flag.StringVar(&loadType, "load_type", "http", "load type. allowed: http, qdrant")
+
 	flag.Parse()
 	var err error
 	initialUrl, err = url.Parse(initialUrlRaw)
 	if err != nil {
-		log.Fatal("bad url: %s", initialUrl)
+		log.Fatalf("bad url: %s", initialUrl)
+	}
+	allowedloadTypes := []string{"http", "qdrant"}
+	notAllowed := true
+	for _, allowedType := range allowedloadTypes {
+		if loadType == allowedType {
+			notAllowed = false
+		}
+	}
+	if notAllowed {
+		log.Fatalf("not allowed load type: %s", loadType)
 	}
 }
 
@@ -65,12 +83,17 @@ type Request struct {
 
 	MaxDuration time.Duration `json:"-"`
 	Url         *url.URL      `json:"-"`
+	AnyData     any           `json:"-"`
 }
+
+type Requests = []Request
 
 type Result struct {
 	Latency    time.Duration
 	StatusCode int
 	err        error
+
+	AnyData any
 }
 
 func Collect(wg *sync.WaitGroup, results <-chan Result) {
@@ -109,7 +132,9 @@ func Collect(wg *sync.WaitGroup, results <-chan Result) {
 	}
 	fmt.Printf("responses total: %d\n", totalResponses)
 	fmt.Printf("avg rps: %f\n", float64(totalResponses)/time.Since(testStart).Seconds())
-	fmt.Printf("avg duration: %s\n", totalDuration/time.Duration(totalResponses))
+	if totalResponses > 0 {
+		fmt.Printf("avg duration: %s\n", totalDuration/time.Duration(totalResponses))
+	}
 }
 
 type Runner interface {
@@ -125,17 +150,29 @@ func main() {
 	fmt.Printf("duration: %s\n", duration)
 	fmt.Printf("timeout: %s\n", timeout)
 	fmt.Printf("url: %s\n", initialUrlRaw)
+	fmt.Printf("load_type: %s\n", loadType)
+	fmt.Print("============")
 	var runners []Runner
 	var generator RequestGenerator
 	var err error
 	if fromJson != "" {
-		generator, err = NewFromJsonGenerator(Request{
-			Url:         initialUrl,
-			Method:      http.MethodGet,
-			MaxDuration: timeout,
-		}, fromJson)
-		if err != nil {
-			log.Fatalf("could not create requests from json: %s\n", err)
+		switch loadType {
+		case LoadTypeHTTP:
+			generator, err = NewFromJsonGenerator(Request{
+				Url:         initialUrl,
+				Method:      http.MethodGet,
+				MaxDuration: timeout,
+			}, fromJson)
+			if err != nil {
+				log.Fatalf("could not create requests from json: %s\n", err)
+			}
+		case LoadTypeQdrant:
+			generator, err = NewQdrantFromJsonGenerator(fromJson)
+			if err != nil {
+				log.Fatalf("could not create requests from json: %s\n", err)
+			}
+		default:
+			log.Fatalf("error on load generator select: unknown load type: %s\n", loadType)
 		}
 	} else {
 		generator = NewSimpleRequestGenerator(Request{
@@ -181,7 +218,14 @@ func main() {
 	wg.Add(concurrency)
 
 	for threadNum := range concurrency {
-		runners = append(runners, NewHttpRunner(threadNum, &wg))
+		switch loadType {
+		case LoadTypeHTTP:
+			runners = append(runners, NewHttpRunner(threadNum, &wg))
+		case LoadTypeQdrant:
+			runners = append(runners, NewQdrantRunner(threadNum, &wg, initialUrlRaw))
+		default:
+			log.Fatalf("error on load runner select: unknown load type: %s\n", loadType)
+		}
 	}
 	wg.Wait()
 
