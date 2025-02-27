@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/pprof"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -236,8 +238,22 @@ func main() {
 	go Collect(&wg, results)
 	// generator
 	ctx, cancel = context.WithTimeout(ctx, duration)
-	defer cancel()
-	generator.GenerateRequests(ctx, requests)
+	defer func() {
+		if ctx.Err() == nil {
+			cancel()
+		}
+
+	}()
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
+	go generator.GenerateRequests(ctx, requests)
+
+	select {
+	case <-done:
+		cancel()
+	case <-ctx.Done():
+	}
+
 	fmt.Println("wrapping up")
 	wgDone.Wait()
 	close(results)

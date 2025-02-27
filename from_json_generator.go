@@ -30,7 +30,8 @@ func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJson
 	}
 	fmt.Printf("%d loaded from %s\n", len(requestsFromJson), sourceFilePath)
 	for i, req := range requestsFromJson {
-		requestsFromJson[i].Url = baseRequest.Url
+		urlCopy := *baseRequest.Url
+		requestsFromJson[i].Url = &urlCopy
 		if req.UrlRaw != "" {
 			url, err := url.Parse(req.UrlRaw)
 			if err != nil {
