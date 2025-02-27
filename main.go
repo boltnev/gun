@@ -92,7 +92,7 @@ out:
 		start := time.Now()
 		reqCtx, cancel := context.WithTimeout(ctx, timeout)
 		response, err := client.Do(req.WithContext(reqCtx))
-		cancel()
+
 		statusCode := 0
 		if response != nil {
 			statusCode = response.StatusCode
@@ -101,6 +101,7 @@ out:
 				response.Body.Close()
 			}
 		}
+		cancel()
 		results <- Result{
 			Latency:    time.Since(start),
 			StatusCode: statusCode,
