@@ -59,6 +59,8 @@ func (h *QdrantRunner) Run(ctx context.Context, wgDone *sync.WaitGroup, requests
 				err:     err,
 				AnyData: points,
 			}
+		default:
+			log.Fatalf("internal error: wrong request data type %T\n", q)
 		}
 		select {
 		case <-ctx.Done():

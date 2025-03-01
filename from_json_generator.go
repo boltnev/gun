@@ -50,13 +50,12 @@ func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJson
 
 func (gen *FromJsonGenerator) GenerateRequests(ctx context.Context, requests chan<- *Request) {
 	defer close(requests)
-out:
 	for {
 		randomReq := gen.sourceRequests[rand.Int()%len(gen.sourceRequests)]
 		select {
 		case requests <- &randomReq:
 		case <-ctx.Done():
-			break out
+			return
 		}
 	}
 }

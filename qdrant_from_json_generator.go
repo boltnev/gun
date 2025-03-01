@@ -63,7 +63,6 @@ func NewQdrantFromJsonGenerator(sourceFilePath string) (*QdrantFromJsonGenerator
 	requestsQdrantFromJson := make(Requests, 0, len(qdrantQueriesFromJson))
 
 	for i, req := range qdrantQueriesFromJson {
-
 		qdrantRequest := &qdrant.QueryPoints{}
 		if req.Collection == "" {
 			return nil, fmt.Errorf("wrong request %d: no collection name", i)
@@ -112,7 +111,7 @@ func NewQdrantFromJsonGenerator(sourceFilePath string) (*QdrantFromJsonGenerator
 			qdrantRequest.Limit = proto.Uint64(uint64(req.Limit))
 		}
 
-		requestsQdrantFromJson = append(requestsQdrantFromJson, Request{AnyData: req})
+		requestsQdrantFromJson = append(requestsQdrantFromJson, Request{AnyData: qdrantRequest})
 	}
 
 	fmt.Printf("%d loaded from %s\n", len(requestsQdrantFromJson), sourceFilePath)

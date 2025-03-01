@@ -79,7 +79,7 @@
         {
           "field": "shop_id",
           "value": 123000,
-          "type": "int",
+          "type": "integer",
           "condition": "match"
         }
       ]
