@@ -3,6 +3,7 @@
     "collection": "offer_vectors",
     "params": {
       "hnsw_ef": 300,
+      "indexed_only": true,
       "quantization": {
         "rescore": false,
         "oversampling": 2.5

@@ -35,6 +35,7 @@ type QdrantQueryFilter struct {
 type QdrantQueryParams struct {
 	HnswEf       int                            `json:"hnsw_ef,omitempty"`
 	Quantization *QdrantQueryParamsQuantization `json:"quantization,omitempty"`
+	IndexedOnly  bool                           `json:"indexed_only,omitempty"`
 }
 
 type QdrantQuery struct {
@@ -95,6 +96,10 @@ func NewQdrantFromJsonGenerator(sourceFilePath string) (*QdrantFromJsonGenerator
 					Rescore:      proto.Bool(req.Params.Quantization.Rescore),
 					Oversampling: proto.Float64(req.Params.Quantization.Oversampling),
 				}
+			}
+
+			if req.Params.IndexedOnly {
+				params.IndexedOnly = proto.Bool(req.Params.IndexedOnly)
 			}
 
 			qdrantRequest.Params = &params
