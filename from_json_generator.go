@@ -16,8 +16,6 @@ type FromJsonGenerator struct {
 	// logger etc
 }
 
-type Requests = []Request
-
 func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJsonGenerator, error) {
 	requestsFromJson := Requests{}
 	sourceBytes, err := os.ReadFile(sourceFilePath)
@@ -52,13 +50,12 @@ func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJson
 
 func (gen *FromJsonGenerator) GenerateRequests(ctx context.Context, requests chan<- *Request) {
 	defer close(requests)
-out:
 	for {
 		randomReq := gen.sourceRequests[rand.Int()%len(gen.sourceRequests)]
 		select {
 		case requests <- &randomReq:
 		case <-ctx.Done():
-			break out
+			return
 		}
 	}
 }

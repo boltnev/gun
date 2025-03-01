@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/qdrant/go-client/qdrant"
 	"log"
 	"net/http"
 	"net/url"
@@ -23,11 +24,17 @@ var initialUrlRaw string
 var initialUrl *url.URL
 var fromJson string
 var maxproc int
+var loadType string
 
 var cpuprofile string
 var memprofile string
 
 const ResultBufferSize = 1024 * 1024 * 20
+
+const (
+	LoadTypeHTTP   = "http"
+	LoadTypeQdrant = "qdrant"
+)
 
 func init() {
 	flag.IntVar(&concurrency, "c", 1, "concurrency threads")
@@ -48,11 +55,23 @@ func init() {
 	flag.StringVar(&cpuprofile, "cpuprofile", "", "cpuprofile filepath")
 	flag.StringVar(&memprofile, "memprofile", "", "memprofile filepath; writing memprofile in the middle of the test")
 
+	flag.StringVar(&loadType, "load_type", "http", "load type. allowed: http, qdrant")
+
 	flag.Parse()
 	var err error
 	initialUrl, err = url.Parse(initialUrlRaw)
 	if err != nil {
-		log.Fatal("bad url: %s", initialUrl)
+		log.Fatalf("bad url: %s", initialUrl)
+	}
+	allowedloadTypes := []string{"http", "qdrant"}
+	notAllowed := true
+	for _, allowedType := range allowedloadTypes {
+		if loadType == allowedType {
+			notAllowed = false
+		}
+	}
+	if notAllowed {
+		log.Fatalf("not allowed load type: %s", loadType)
 	}
 }
 
@@ -65,23 +84,33 @@ type Request struct {
 
 	MaxDuration time.Duration `json:"-"`
 	Url         *url.URL      `json:"-"`
+	AnyData     any           `json:"-"`
 }
+
+type Requests = []Request
 
 type Result struct {
 	Latency    time.Duration
 	StatusCode int
 	err        error
+
+	AnyData any
 }
 
-func Collect(wg *sync.WaitGroup, results <-chan Result) {
+func Collect(ctx context.Context, wg *sync.WaitGroup, results <-chan Result) {
 	defer wg.Done()
 	var totalDuration time.Duration = 0
 	var totalResponses int = 0
 	var testStart time.Time
 	statusMap := make(map[int]int)
+	errsCount := 0
+
+	// TODO: refactor qdrant stuff
+	pointsFound := 0
+	maxScore := float64(0)
 
 	ticker := time.NewTicker(500 * time.Millisecond)
-
+out:
 	for result := range results {
 		totalResponses++
 		totalDuration += result.Latency
@@ -90,26 +119,70 @@ func Collect(wg *sync.WaitGroup, results <-chan Result) {
 			fmt.Printf("test started: %s\n", testStart)
 		}
 		statusMap[result.StatusCode]++
-
+		if result.err != nil {
+			errsCount++
+		}
+		switch data := result.AnyData.(type) {
+		case []*qdrant.ScoredPoint:
+			pointsFound += len(data)
+			score := float32(0)
+			for _, point := range data {
+				if point.Score > score {
+					score = point.Score
+				}
+			}
+			maxScore += float64(score)
+		default:
+		}
 		select {
 		case <-ticker.C:
-			fmt.Printf("responses total: %d; avg rps: %f; avg duration %s; \n",
-				totalResponses,
-				float64(totalResponses)/time.Since(testStart).Seconds(),
-				totalDuration/time.Duration(totalResponses),
-			)
+			switch loadType {
+			case LoadTypeQdrant:
+				fmt.Printf("responses total: %d; avg rps: %f; avg duration %s; avg points count: %f; avg max score: %f\n",
+					totalResponses,
+					float64(totalResponses)/time.Since(testStart).Seconds(),
+					totalDuration/time.Duration(totalResponses),
+					float64(pointsFound)/float64(totalResponses),
+					float64(maxScore)/float64(totalResponses),
+				)
+			default:
+				fmt.Printf("responses total: %d; avg rps: %f; avg duration %s; \n",
+					totalResponses,
+					float64(totalResponses)/time.Since(testStart).Seconds(),
+					totalDuration/time.Duration(totalResponses),
+				)
+			}
+		case <-ctx.Done():
+			break out
 		default:
 		}
 	}
 
 	fmt.Printf("test ended: %s\n", time.Now())
-	fmt.Printf("http status stats:\n")
-	for status, count := range statusMap {
-		fmt.Printf(">>> status: %d count %d\n", status, count)
-	}
 	fmt.Printf("responses total: %d\n", totalResponses)
+	switch loadType {
+	case LoadTypeHTTP:
+		fmt.Printf("http status stats:\n")
+		for status, count := range statusMap {
+			fmt.Printf(">>> status: %d count %d\n", status, count)
+		}
+	case LoadTypeQdrant:
+		fmt.Printf("qdrant status request errors %d:\n", errsCount)
+		if totalResponses > 0 {
+			fmt.Printf("responses total: %d; avg rps: %f; avg duration %s; avg points count: %f; avg max score: %f\n",
+				totalResponses,
+				float64(totalResponses)/time.Since(testStart).Seconds(),
+				totalDuration/time.Duration(totalResponses),
+				float64(pointsFound)/float64(totalResponses),
+				float64(maxScore)/float64(totalResponses),
+			)
+		}
+	default:
+	}
 	fmt.Printf("avg rps: %f\n", float64(totalResponses)/time.Since(testStart).Seconds())
-	fmt.Printf("avg duration: %s\n", totalDuration/time.Duration(totalResponses))
+	if totalResponses > 0 {
+		fmt.Printf("avg duration: %s\n", totalDuration/time.Duration(totalResponses))
+	}
 }
 
 type Runner interface {
@@ -125,17 +198,29 @@ func main() {
 	fmt.Printf("duration: %s\n", duration)
 	fmt.Printf("timeout: %s\n", timeout)
 	fmt.Printf("url: %s\n", initialUrlRaw)
+	fmt.Printf("load_type: %s\n", loadType)
+	fmt.Print("============")
 	var runners []Runner
 	var generator RequestGenerator
 	var err error
 	if fromJson != "" {
-		generator, err = NewFromJsonGenerator(Request{
-			Url:         initialUrl,
-			Method:      http.MethodGet,
-			MaxDuration: timeout,
-		}, fromJson)
-		if err != nil {
-			log.Fatalf("could not create requests from json: %s\n", err)
+		switch loadType {
+		case LoadTypeHTTP:
+			generator, err = NewFromJsonGenerator(Request{
+				Url:         initialUrl,
+				Method:      http.MethodGet,
+				MaxDuration: timeout,
+			}, fromJson)
+			if err != nil {
+				log.Fatalf("could not create requests from json: %s\n", err)
+			}
+		case LoadTypeQdrant:
+			generator, err = NewQdrantFromJsonGenerator(fromJson)
+			if err != nil {
+				log.Fatalf("could not create requests from json: %s\n", err)
+			}
+		default:
+			log.Fatalf("error on load generator select: unknown load type: %s\n", loadType)
 		}
 	} else {
 		generator = NewSimpleRequestGenerator(Request{
@@ -181,7 +266,14 @@ func main() {
 	wg.Add(concurrency)
 
 	for threadNum := range concurrency {
-		runners = append(runners, NewHttpRunner(threadNum, &wg))
+		switch loadType {
+		case LoadTypeHTTP:
+			runners = append(runners, NewHttpRunner(threadNum, &wg))
+		case LoadTypeQdrant:
+			runners = append(runners, NewQdrantRunner(threadNum, &wg, initialUrlRaw))
+		default:
+			log.Fatalf("error on load runner select: unknown load type: %s\n", loadType)
+		}
 	}
 	wg.Wait()
 
@@ -192,9 +284,9 @@ func main() {
 
 	wg.Add(1)
 	// Collect and display
-	go Collect(&wg, results)
+	ctxCollection, cancelCollection := context.WithTimeout(ctx, duration)
+	go Collect(ctxCollection, &wg, results)
 	// generator
-	ctx, cancel = context.WithTimeout(ctx, duration)
 	defer func() {
 		if ctx.Err() == nil {
 			cancel()
@@ -207,6 +299,7 @@ func main() {
 	select {
 	case <-done:
 		cancel()
+		cancelCollection()
 	case <-ctx.Done():
 	}
 
