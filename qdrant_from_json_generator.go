@@ -36,6 +36,7 @@ type QdrantQueryParams struct {
 	HnswEf       int                            `json:"hnsw_ef,omitempty"`
 	Quantization *QdrantQueryParamsQuantization `json:"quantization,omitempty"`
 	IndexedOnly  bool                           `json:"indexed_only,omitempty"`
+	Exact        bool                           `json:"exact,omitempty"`
 }
 
 type QdrantQuery struct {
@@ -100,6 +101,9 @@ func NewQdrantFromJsonGenerator(sourceFilePath string) (*QdrantFromJsonGenerator
 
 			if req.Params.IndexedOnly {
 				params.IndexedOnly = proto.Bool(req.Params.IndexedOnly)
+			}
+			if req.Params.Exact {
+				params.Exact = proto.Bool(req.Params.Exact)
 			}
 
 			qdrantRequest.Params = &params

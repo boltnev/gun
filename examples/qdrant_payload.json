@@ -4,6 +4,7 @@
     "params": {
       "hnsw_ef": 300,
       "indexed_only": true,
+      "exact": false,
       "quantization": {
         "rescore": false,
         "oversampling": 2.5

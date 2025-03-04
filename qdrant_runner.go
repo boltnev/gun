@@ -44,7 +44,9 @@ func NewQdrantRunner(threadNum int, wgReady *sync.WaitGroup, dsn string) *Qdrant
 }
 
 func (h *QdrantRunner) Run(ctx context.Context, wgDone *sync.WaitGroup, requests <-chan *Request, results chan<- Result) {
+	defer h.client.Close()
 	defer wgDone.Done()
+
 	for req := range requests {
 		switch q := req.AnyData.(type) {
 		case *qdrant.QueryPoints:
