@@ -47,6 +47,7 @@ type QdrantQuery struct {
 	Limit       int                `json:"limit,omitempty"`
 	WithPayload bool               `json:"with_payload,omitempty"`
 	WithVectors bool               `json:"with_vectors,omitempty"`
+	ShardKeys   []uint64           `json:"shard_keys"`
 }
 
 type QdrantQueries []*QdrantQuery
@@ -118,6 +119,14 @@ func NewQdrantFromJsonGenerator(sourceFilePath string) (*QdrantFromJsonGenerator
 
 		if req.Limit != 0 {
 			qdrantRequest.Limit = proto.Uint64(uint64(req.Limit))
+		}
+
+		if len(req.ShardKeys) > 0 {
+			shardKeys := []*qdrant.ShardKey{}
+			for _, shardKey := range req.ShardKeys {
+				shardKeys = append(shardKeys, qdrant.NewShardKeyNum(shardKey))
+			}
+			qdrantRequest.ShardKeySelector = &qdrant.ShardKeySelector{ShardKeys: shardKeys}
 		}
 
 		requestsQdrantFromJson = append(requestsQdrantFromJson, Request{AnyData: qdrantRequest})

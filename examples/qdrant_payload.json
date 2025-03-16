@@ -87,7 +87,8 @@
       ]
     },
     "limit": 100,
-    "with_paylod": false,
-    "with_vectors": false
+    "with_payload": false,
+    "with_vectors": false,
+    "shard_keys": []
   }
 ]
