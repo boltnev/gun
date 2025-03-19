@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
 
@@ -47,7 +48,7 @@ type QdrantQuery struct {
 	Limit       int                `json:"limit,omitempty"`
 	WithPayload bool               `json:"with_payload,omitempty"`
 	WithVectors bool               `json:"with_vectors,omitempty"`
-	ShardKeys   []uint64           `json:"shard_keys"`
+	ShardKeys   []any              `json:"shard_keys"`
 }
 
 type QdrantQueries []*QdrantQuery
@@ -124,7 +125,15 @@ func NewQdrantFromJsonGenerator(sourceFilePath string) (*QdrantFromJsonGenerator
 		if len(req.ShardKeys) > 0 {
 			shardKeys := []*qdrant.ShardKey{}
 			for _, shardKey := range req.ShardKeys {
-				shardKeys = append(shardKeys, qdrant.NewShardKeyNum(shardKey))
+				switch key := shardKey.(type) {
+				case int:
+					shardKeys = append(shardKeys, qdrant.NewShardKeyNum(uint64(key)))
+				case string:
+					shardKeys = append(shardKeys, qdrant.NewShardKey(key))
+				default:
+					log.Fatalf("invalid type %s", key)
+
+				}
 			}
 			qdrantRequest.ShardKeySelector = &qdrant.ShardKeySelector{ShardKeys: shardKeys}
 		}
