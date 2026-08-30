@@ -5,7 +5,7 @@ next steps:
 
 - [ ] ability to make requests with body
     - [ ] body from file
-    - [ ] headers
+    - [x] headers
     - [ ] cookies
     - [ ] format for body from file
 - [x] ability to make prepared requests from file
@@ -15,6 +15,6 @@ next steps:
 - [x] unit tests
 - [ ] better app name
 - [ ] better display formats
-- [ ] user agent option
+- [x] user agent option
 - [ ] cluster(i.e. several ips)
 - [ ] histograms

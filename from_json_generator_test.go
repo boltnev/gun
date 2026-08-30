@@ -61,6 +61,29 @@ func TestNewFromJsonGeneratorAppliesUrlAndPath(t *testing.T) {
 	}
 }
 
+func TestNewFromJsonGeneratorParsesHeaders(t *testing.T) {
+	base := Request{Url: mustParseURL(t, "http://base.test"), Method: http.MethodGet}
+
+	path := writeTempFile(t, `[
+		{"path":"/with/headers","headers":{"X-Token":"abc","User-Agent":"json-agent"}}
+	]`)
+	gen, err := NewFromJsonGenerator(base, path)
+	if err != nil {
+		t.Fatalf("could not create generator: %s", err)
+	}
+
+	headers := gen.sourceRequests[0].Headers
+	if len(headers) != 2 {
+		t.Fatalf("parsed %d headers, want 2: %v", len(headers), headers)
+	}
+	if headers["X-Token"] != "abc" {
+		t.Errorf("X-Token = %q, want %q", headers["X-Token"], "abc")
+	}
+	if headers["User-Agent"] != "json-agent" {
+		t.Errorf("User-Agent = %q, want %q", headers["User-Agent"], "json-agent")
+	}
+}
+
 func TestFromJsonGeneratorLoadsExamplePayload(t *testing.T) {
 	base := Request{Url: mustParseURL(t, "http://base.test"), Method: http.MethodGet}
 	if _, err := NewFromJsonGenerator(base, "examples/payload.json"); err != nil {

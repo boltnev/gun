@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -29,8 +30,26 @@ var loadType string
 var rateLimit float64
 var burstLimit int
 
+var cliHeaderFlags headerFlagList
+var cliHeaders [][2]string
+
 var cpuprofile string
 var memprofile string
+
+// headerFlagList collects repeatable -H "Name: value" flags.
+type headerFlagList []string
+
+func (l *headerFlagList) String() string {
+	if len(*l) == 0 {
+		return ""
+	}
+	return strings.Join(*l, "; ")
+}
+
+func (l *headerFlagList) Set(value string) error {
+	*l = append(*l, value)
+	return nil
+}
 
 const ResultBufferSize = 1024 * 1024 * 20
 
@@ -62,6 +81,9 @@ func init() {
 
 	flag.Float64Var(&rateLimit, "rate", 0, "rate limit")
 	flag.IntVar(&burstLimit, "burst", 0, "burst limit")
+
+	flag.Var(&cliHeaderFlags, "H", `request header "Name: value", repeatable`)
+	flag.Var(&cliHeaderFlags, "header", `request header "Name: value", repeatable`)
 }
 
 type Request struct {
@@ -70,6 +92,9 @@ type Request struct {
 	Host   string `json:"host,omitempty"`
 	Method string `json:"method,omitempty"`
 	Body   string `json:"body,omitempty"`
+	// Headers override same-named -H flags; the default user agent only
+	// applies when neither sets one
+	Headers map[string]string `json:"headers,omitempty"`
 
 	MaxDuration time.Duration `json:"-"`
 	Url         *url.URL      `json:"-"`
@@ -108,6 +133,14 @@ func main() {
 	initialUrl, err = url.Parse(initialUrlRaw)
 	if err != nil {
 		log.Fatalf("bad url: %s", initialUrl)
+	}
+	for _, raw := range cliHeaderFlags {
+		name, value, found := strings.Cut(raw, ":")
+		name = strings.TrimSpace(name)
+		if !found || name == "" {
+			log.Fatalf("wrong header %q: want \"Name: value\"", raw)
+		}
+		cliHeaders = append(cliHeaders, [2]string{name, strings.TrimSpace(value)})
 	}
 	allowedloadTypes := []string{"http", "qdrant"}
 	notAllowed := true

@@ -158,6 +158,99 @@ func TestHttpRunnerRespectsRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestHttpRunnerSendsDefaultUserAgent(t *testing.T) {
+	var mu sync.Mutex
+	var userAgent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		userAgent = r.Header.Get("User-Agent")
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	setLoadGlobals(t, LoadTypeHTTP, 1, 5*time.Second)
+
+	requests := make(chan *Request, 1)
+	results := make(chan Result, 1)
+	requests <- &Request{Url: mustParseURL(t, srv.URL), Method: http.MethodGet}
+	close(requests)
+
+	runner := newTestRunner(t)
+	wgDone := &sync.WaitGroup{}
+	wgDone.Add(1)
+	runner.Run(context.Background(), wgDone, requests, results)
+	wgDone.Wait()
+
+	if res := <-results; res.err != nil {
+		t.Errorf("unexpected error: %s", res.err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if userAgent != DefaultUserAgent {
+		t.Errorf("user agent = %q, want %q", userAgent, DefaultUserAgent)
+	}
+}
+
+func TestHttpRunnerAppliesCliAndRequestHeaders(t *testing.T) {
+	setHeaders(t, [][2]string{
+		{"X-Cli", "cli"},
+		{"User-Agent", "cli-agent"},
+	})
+
+	var mu sync.Mutex
+	seen := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen["X-Cli"] = r.Header.Get("X-Cli")
+		seen["X-Req"] = r.Header.Get("X-Req")
+		seen["User-Agent"] = r.Header.Get("User-Agent")
+		seen["Host"] = r.Host
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	setLoadGlobals(t, LoadTypeHTTP, 1, 5*time.Second)
+
+	requests := make(chan *Request, 1)
+	results := make(chan Result, 1)
+	requests <- &Request{
+		Url:    mustParseURL(t, srv.URL),
+		Method: http.MethodGet,
+		Headers: map[string]string{
+			"X-Req":      "req",
+			"User-Agent": "req-agent",
+			"Host":       "example.test",
+		},
+	}
+	close(requests)
+
+	runner := newTestRunner(t)
+	wgDone := &sync.WaitGroup{}
+	wgDone.Add(1)
+	runner.Run(context.Background(), wgDone, requests, results)
+	wgDone.Wait()
+
+	if res := <-results; res.err != nil {
+		t.Errorf("unexpected error: %s", res.err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := map[string]string{
+		"X-Cli":      "cli",
+		"X-Req":      "req",
+		"User-Agent": "req-agent", // per-request headers override -H
+		"Host":       "example.test",
+	}
+	for name, wantValue := range want {
+		if seen[name] != wantValue {
+			t.Errorf("%s = %q, want %q", name, seen[name], wantValue)
+		}
+	}
+}
+
 func TestHttpRunnerProcessesAllRequestsFromChannel(t *testing.T) {
 	var mu sync.Mutex
 	pathsServed := 0

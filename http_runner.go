@@ -7,9 +7,37 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
+
+const DefaultUserAgent = "Gun LoadTesting Tool/0.1"
+
+// applyHeaders layers headers onto the request: -H flags first, then
+// per-request headers from the json payload (they win), with the default
+// user agent filling whatever is left.
+func applyHeaders(hr *http.Request, req *Request) {
+	for _, header := range cliHeaders {
+		setHeader(hr, header[0], header[1])
+	}
+	for name, value := range req.Headers {
+		setHeader(hr, name, value)
+	}
+	if hr.Header.Get("User-Agent") == "" {
+		hr.Header.Set("User-Agent", DefaultUserAgent)
+	}
+}
+
+// setHeader routes the Host header to the dedicated request field: net/http
+// ignores "Host" in the header map for client requests.
+func setHeader(hr *http.Request, name, value string) {
+	if strings.EqualFold(name, "Host") {
+		hr.Host = value
+		return
+	}
+	hr.Header.Set(name, value)
+}
 
 type HttpRunner struct {
 	threadNum int
@@ -49,6 +77,7 @@ out:
 		if err != nil {
 			log.Fatalf("could not create request: %s", err)
 		}
+		applyHeaders(httpReq, req)
 		start := time.Now()
 		response, err := h.client.Do(httpReq)
 		statusCode := 0

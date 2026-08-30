@@ -1,0 +1,19 @@
+[
+  {
+    "method": "GET",
+    "path": "/api",
+    "headers": {
+      "User-Agent": "Gun LoadTesting Tool/custom",
+      "X-Api-Key": "secret-token"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/submit",
+    "body": "{\"value\":42}",
+    "headers": {
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    }
+  }
+]

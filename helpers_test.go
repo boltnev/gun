@@ -38,6 +38,17 @@ func setLoadGlobals(t *testing.T, load string, c int, requestTimeout time.Durati
 	})
 }
 
+// setHeaders overrides the parsed -H flags for a test and restores the
+// previous value when the test finishes.
+func setHeaders(t *testing.T, headers [][2]string) {
+	t.Helper()
+	oldHeaders := cliHeaders
+	cliHeaders = headers
+	t.Cleanup(func() {
+		cliHeaders = oldHeaders
+	})
+}
+
 func newTestRunner(t *testing.T) *HttpRunner {
 	t.Helper()
 	wgReady := &sync.WaitGroup{}
