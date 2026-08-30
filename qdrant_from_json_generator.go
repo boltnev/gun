@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 
@@ -128,11 +127,16 @@ func NewQdrantFromJsonGenerator(sourceFilePath string) (*QdrantFromJsonGenerator
 				switch key := shardKey.(type) {
 				case int:
 					shardKeys = append(shardKeys, qdrant.NewShardKeyNum(uint64(key)))
+				case float64:
+					// encoding/json unmarshals every json number into any as float64
+					if key != float64(uint64(key)) {
+						return nil, fmt.Errorf("wrong request %d: shard key %v is not an integer", i, key)
+					}
+					shardKeys = append(shardKeys, qdrant.NewShardKeyNum(uint64(key)))
 				case string:
 					shardKeys = append(shardKeys, qdrant.NewShardKey(key))
 				default:
-					log.Fatalf("invalid type %s", key)
-
+					return nil, fmt.Errorf("wrong request %d: invalid shard key type %T", i, key)
 				}
 			}
 			qdrantRequest.ShardKeySelector = &qdrant.ShardKeySelector{ShardKeys: shardKeys}

@@ -62,23 +62,6 @@ func init() {
 
 	flag.Float64Var(&rateLimit, "rate", 0, "rate limit")
 	flag.IntVar(&burstLimit, "burst", 0, "burst limit")
-
-	flag.Parse()
-	var err error
-	initialUrl, err = url.Parse(initialUrlRaw)
-	if err != nil {
-		log.Fatalf("bad url: %s", initialUrl)
-	}
-	allowedloadTypes := []string{"http", "qdrant"}
-	notAllowed := true
-	for _, allowedType := range allowedloadTypes {
-		if loadType == allowedType {
-			notAllowed = false
-		}
-	}
-	if notAllowed {
-		log.Fatalf("not allowed load type: %s", loadType)
-	}
 }
 
 type Request struct {
@@ -120,6 +103,23 @@ type RateLimiter interface {
 }
 
 func main() {
+	flag.Parse()
+	var err error
+	initialUrl, err = url.Parse(initialUrlRaw)
+	if err != nil {
+		log.Fatalf("bad url: %s", initialUrl)
+	}
+	allowedloadTypes := []string{"http", "qdrant"}
+	notAllowed := true
+	for _, allowedType := range allowedloadTypes {
+		if loadType == allowedType {
+			notAllowed = false
+		}
+	}
+	if notAllowed {
+		log.Fatalf("not allowed load type: %s", loadType)
+	}
+
 	fmt.Printf("concurrency: %d\n", concurrency)
 	fmt.Printf("duration: %s\n", duration)
 	fmt.Printf("timeout: %s\n", timeout)
@@ -130,7 +130,6 @@ func main() {
 	var generator RequestGenerator
 	var collector Collector
 
-	var err error
 	if fromJson != "" {
 		switch loadType {
 		case LoadTypeHTTP:

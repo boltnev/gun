@@ -12,7 +12,7 @@ next steps:
     - [ ] requests nicer format(protobuf,for example)
 - [ ] performance tuning to be as good as wrk
 - [ ] latency count
-- [ ] unit tests
+- [x] unit tests
 - [ ] better app name
 - [ ] better display formats
 - [ ] user agent option
