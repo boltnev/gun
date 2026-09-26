@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/qdrant/go-client/qdrant"
+	"golang.org/x/sys/unix"
 )
 
 type SimpleCollector struct {
@@ -35,25 +36,48 @@ func stdoutIsTerminal() bool {
 }
 
 // redraw erases the previously drawn lines and prints the new block in their
-// place; without a terminal it appends the lines the plain way.
+// place. Progress output is terminal-only: without a terminal the mid-run
+// section is skipped entirely so logs and pipes stay clean.
 func (s *SimpleCollector) redraw(lines []string) {
 	if !s.interactive {
-		for _, line := range lines {
-			fmt.Println(line)
-		}
 		return
 	}
+	// a line wider than the terminal wraps onto a second physical row, which
+	// breaks the move-up-N-lines arithmetic — clip every line to the width
+	width := terminalWidth()
 	var b strings.Builder
 	if s.progressLines > 0 {
 		fmt.Fprintf(&b, "\x1b[%dA", s.progressLines) // cursor up to the first drawn line
 	}
 	for _, line := range lines {
-		fmt.Fprintf(&b, "\x1b[2K%s\n", line) // clear line, write, step down
+		fmt.Fprintf(&b, "\x1b[2K%s\n", truncateLine(line, width)) // clear line, write, step down
 	}
 	// erase leftovers when the new block has fewer lines than the last one
 	b.WriteString("\x1b[J")
 	fmt.Print(b.String())
 	s.progressLines = len(lines)
+}
+
+// terminalWidth returns the stdout width in terminal cells, or 0 when it
+// cannot be determined.
+func terminalWidth() int {
+	ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
+	if err != nil || ws.Col == 0 {
+		return 0
+	}
+	return int(ws.Col)
+}
+
+// truncateLine clips a report line to the terminal width.
+func truncateLine(line string, width int) string {
+	if width <= 0 {
+		return line
+	}
+	runes := []rune(line)
+	if len(runes) <= width {
+		return line
+	}
+	return string(runes[:width])
 }
 
 // clearProgress erases the progress block so the final report starts on a
@@ -80,9 +104,23 @@ func (s *SimpleCollector) Collect(ctx context.Context, wg *sync.WaitGroup, resul
 	var firstByteLatencies Samples
 	var sizes Samples
 
+	// transfer accounting: request wire bytes and response header bytes are
+	// estimated by the HTTP runner; response body bytes come via sizes
+	sentBytesTotal := int64(0)
+	recvHeaderBytesTotal := int64(0)
+
 	// TODO: refactor qdrant stuff
 	pointsFound := 0
 	maxScore := float64(0)
+
+	// qdrantAvg renders the qdrant-specific summary line shared by the
+	// progress and finish sections.
+	qdrantAvg := func() string {
+		return fmt.Sprintf("%.1f   max score avg %.3f",
+			float64(pointsFound)/float64(totalResponses),
+			maxScore/float64(totalResponses),
+		)
+	}
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 out:
@@ -91,9 +129,10 @@ out:
 		totalDuration += result.Latency
 		if totalResponses == 1 {
 			testStart = time.Now().Add(-result.Latency)
-			fmt.Printf("test started: %s\n", testStart)
 		}
 		statusMap[result.StatusCode]++
+		sentBytesTotal += result.SentBytes
+		recvHeaderBytesTotal += result.RecvHeaderBytes
 		if result.err != nil {
 			errsCount++
 		} else {
@@ -117,23 +156,24 @@ out:
 		}
 		select {
 		case <-ticker.C:
-			summary := fmt.Sprintf("responses total: %d; avg rps: %f; avg duration %s",
-				totalResponses,
-				float64(totalResponses)/time.Since(testStart).Seconds(),
-				totalDuration/time.Duration(totalResponses),
-			)
+			elapsed := time.Since(testStart)
+			lines := []string{
+				kv("running", fmt.Sprintf("%s/%s  %s",
+					formatNs(float64(elapsed)), formatNs(float64(duration)), progressBar(elapsed, duration))),
+				kv("responses", fmt.Sprintf("%s   rps %.1f   errors %s",
+					formatCount(totalResponses),
+					float64(totalResponses)/elapsed.Seconds(), formatCount(errsCount))),
+			}
 			if loadType == LoadTypeQdrant {
-				summary += fmt.Sprintf("; avg points count: %f; avg max score: %f; errors: %d",
-					float64(pointsFound)/float64(totalResponses),
-					float64(maxScore)/float64(totalResponses),
-					errsCount,
-				)
+				lines = append(lines, kv("points avg", qdrantAvg()))
+			} else {
+				lines = append(lines, kv("statuses", statusCounts(statusMap)))
+				lines = append(lines, kv("transfer", fmt.Sprintf("sent %s/s   recv %s/s",
+					humanBytes(float64(sentBytesTotal)/elapsed.Seconds()),
+					humanBytes(float64(sizes.Total()+recvHeaderBytesTotal)/elapsed.Seconds()))))
 			}
-			lines := []string{summary}
-			if loadType == LoadTypeHTTP {
-				lines = append(lines, "statuses: "+statusCounts(statusMap))
-			}
-			lines = append(lines, statsBlockLines(&latencies, &firstByteLatencies, &sizes)...)
+			lines = append(lines, "")
+			lines = append(lines, statsTableLines(&latencies, &firstByteLatencies, &sizes)...)
 			s.redraw(lines)
 		case <-ctx.Done():
 			break out
@@ -142,47 +182,44 @@ out:
 	}
 
 	s.clearProgress()
-	fmt.Printf("test ended: %s\n", time.Now())
-	fmt.Printf("responses total: %d\n", totalResponses)
+	elapsed := time.Since(testStart)
+	rps := float64(totalResponses) / elapsed.Seconds()
+	lines := []string{
+		separator,
+		kv("finished", fmt.Sprintf("%s   elapsed %s",
+			time.Now().Format("2006-01-02 15:04:05"), formatNs(float64(elapsed)))),
+		kv("responses", fmt.Sprintf("%s   rps %.1f   errors %s",
+			formatCount(totalResponses), rps, formatCount(errsCount))),
+	}
 	switch loadType {
 	case LoadTypeHTTP:
-		fmt.Printf("http status stats: %s\n", statusCounts(statusMap))
+		lines = append(lines, kv("statuses", statusCounts(statusMap)))
 	case LoadTypeQdrant:
-		fmt.Printf("qdrant status request errors %d:\n", errsCount)
 		if totalResponses > 0 {
-			fmt.Printf("responses total: %d; avg rps: %f; avg points count: %f; avg max score: %f\n",
-				totalResponses,
-				float64(totalResponses)/time.Since(testStart).Seconds(),
-				float64(pointsFound)/float64(totalResponses),
-				float64(maxScore)/float64(totalResponses),
-			)
+			lines = append(lines, kv("points avg", qdrantAvg()))
 		}
 	default:
 	}
-	fmt.Printf("avg rps: %f\n", float64(totalResponses)/time.Since(testStart).Seconds())
 	if latencies.Count() == 0 {
-		fmt.Printf("latency stats: no successful responses\n")
+		lines = append(lines, "  no successful responses")
 	} else {
-		for _, line := range statsBlockLines(&latencies, &firstByteLatencies, &sizes) {
-			fmt.Println(line)
-		}
+		lines = append(lines, "")
+		lines = append(lines, statsTableLines(&latencies, &firstByteLatencies, &sizes)...)
 	}
-}
-
-// statsBlockLines returns one line per stats block that has samples; shared
-// by the mid-run progress redraw and the final report.
-func statsBlockLines(latencies, firstByteLatencies, sizes *Samples) []string {
-	var lines []string
-	if latencies.Count() > 0 {
-		lines = append(lines, fmt.Sprintf("latency stats (%d responses): %s", latencies.Count(), DurationStatsLine(latencies)))
+	if loadType == LoadTypeHTTP && totalResponses > 0 {
+		recvTotal := sizes.Total() + recvHeaderBytesTotal
+		lines = append(lines, "",
+			kv("sent", fmt.Sprintf("%s total   %s/s",
+				humanBytes(float64(sentBytesTotal)),
+				humanBytes(float64(sentBytesTotal)/elapsed.Seconds()))),
+			kv("recv", fmt.Sprintf("%s total   %s/s",
+				humanBytes(float64(recvTotal)),
+				humanBytes(float64(recvTotal)/elapsed.Seconds()))),
+		)
 	}
-	if firstByteLatencies.Count() > 0 {
-		lines = append(lines, fmt.Sprintf("time to first byte stats (%d responses): %s", firstByteLatencies.Count(), DurationStatsLine(firstByteLatencies)))
+	for _, line := range lines {
+		fmt.Println(line)
 	}
-	if sizes.Count() > 0 {
-		lines = append(lines, fmt.Sprintf("response size stats in bytes (%d responses): %s", sizes.Count(), SizeStatsLine(sizes)))
-	}
-	return lines
 }
 
 // statusCounts renders the status counter as deterministic "code=count"

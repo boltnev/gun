@@ -1,27 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"math"
-	"strconv"
-	"strings"
-	"time"
 )
-
-type percentileQuantile struct {
-	label string
-	p     float64
-}
-
-// summaryPercentiles is the percentile set printed in stats blocks.
-var summaryPercentiles = []percentileQuantile{
-	{"p50", 50},
-	{"p75", 75},
-	{"p90", 90},
-	{"p95", 95},
-	{"p99", 99},
-	{"p99.9", 99.9},
-}
 
 const (
 	// bucketsPerDecade sets the histogram resolution: one bucket per 0.1%
@@ -62,6 +43,9 @@ func (s *Samples) Observe(v int64) {
 }
 
 func (s *Samples) Count() int { return int(s.count) }
+
+// Total is the exact sum of all observed values.
+func (s *Samples) Total() int64 { return s.sum }
 
 func (s *Samples) Min() int64 {
 	if s.count == 0 {
@@ -133,31 +117,3 @@ func (s *Samples) Percentile(p float64) float64 {
 	}
 	return float64(s.maxV)
 }
-
-func formatNs(v float64) string {
-	return time.Duration(math.Round(v)).String()
-}
-
-// formatBytes rounds to whole bytes: sizes are byte counts, and interpolated
-// percentiles carry float dust that would otherwise show up as 298.99999999.
-func formatBytes(v float64) string {
-	return strconv.FormatInt(int64(math.Round(v)), 10)
-}
-
-func statsLine(s *Samples, format func(float64) string) string {
-	parts := []string{
-		"min " + format(float64(s.Min())),
-		"avg " + format(s.Avg()),
-		"max " + format(float64(s.Max())),
-	}
-	for _, pq := range summaryPercentiles {
-		parts = append(parts, fmt.Sprintf("%s %s", pq.label, format(s.Percentile(pq.p))))
-	}
-	return strings.Join(parts, "; ")
-}
-
-// DurationStatsLine formats the min/avg/max/percentile summary for duration samples.
-func DurationStatsLine(s *Samples) string { return statsLine(s, formatNs) }
-
-// SizeStatsLine formats the same summary for byte-count samples.
-func SizeStatsLine(s *Samples) string { return statsLine(s, formatBytes) }

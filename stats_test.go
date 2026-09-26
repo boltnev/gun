@@ -2,7 +2,6 @@ package main
 
 import (
 	"math"
-	"strings"
 	"testing"
 	"time"
 )
@@ -160,41 +159,5 @@ func TestSamplesZeroAndHugeValues(t *testing.T) {
 	// representative sits just under 10^13
 	if got := s.Percentile(100); got < 9.9e12 || got > 1e13 {
 		t.Errorf("percentile(100) = %f, want the top bucket just under 1e13", got)
-	}
-}
-
-func TestDurationStatsLine(t *testing.T) {
-	var s Samples
-	for _, d := range []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 30 * time.Millisecond} {
-		s.Observe(int64(d))
-	}
-
-	// min/avg/max are exact; percentile values are bucket representatives,
-	// so only the shape of the line is asserted here
-	got := DurationStatsLine(&s)
-	if prefix := "min 10ms; avg 20ms; max 30ms; p50 "; !strings.HasPrefix(got, prefix) {
-		t.Errorf("duration stats line = %q, want prefix %q", got, prefix)
-	}
-	for _, label := range []string{"; p75 ", "; p90 ", "; p95 ", "; p99 ", "; p99.9"} {
-		if !strings.Contains(got, label) {
-			t.Errorf("duration stats line = %q, missing %q", got, label)
-		}
-	}
-}
-
-func TestSizeStatsLine(t *testing.T) {
-	var s Samples
-	for _, v := range []int64{100, 200, 300} {
-		s.Observe(v)
-	}
-
-	got := SizeStatsLine(&s)
-	if prefix := "min 100; avg 200; max 300; p50 "; !strings.HasPrefix(got, prefix) {
-		t.Errorf("size stats line = %q, want prefix %q", got, prefix)
-	}
-	for _, label := range []string{"; p75 ", "; p90 ", "; p95 ", "; p99 ", "; p99.9"} {
-		if !strings.Contains(got, label) {
-			t.Errorf("size stats line = %q, missing %q", got, label)
-		}
 	}
 }

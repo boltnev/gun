@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -104,6 +105,12 @@ func TestHttpRunnerRecordsFirstByteLatencyAndSize(t *testing.T) {
 	if res.SizeBytes != int64(len(body)) {
 		t.Errorf("size = %d, want %d", res.SizeBytes, len(body))
 	}
+	if res.SentBytes <= 0 {
+		t.Errorf("sent bytes = %d, want positive", res.SentBytes)
+	}
+	if res.RecvHeaderBytes <= 0 {
+		t.Errorf("recv header bytes = %d, want positive", res.RecvHeaderBytes)
+	}
 	if res.FirstByteLatency <= 0 || res.Latency <= 0 {
 		t.Errorf("first byte latency = %s, latency = %s, want positive", res.FirstByteLatency, res.Latency)
 	}
@@ -114,6 +121,37 @@ func TestHttpRunnerRecordsFirstByteLatencyAndSize(t *testing.T) {
 	// first byte latency is captured at the headers, not after the body
 	if gap := res.Latency - res.FirstByteLatency; gap < 10*time.Millisecond {
 		t.Errorf("latency - first byte latency = %s, want >= 10ms (body delayed by 30ms)", gap)
+	}
+}
+
+// requestWireSize/responseHeaderWireSize are hand-checked estimates:
+// "GET /path?q=1 HTTP/1.1\r\n" (24) + "Host: example.com\r\n" (19) +
+// "User-Agent: x\r\n" (15) + final CRLF (2) + body "hello" (5)
+func TestRequestWireSize(t *testing.T) {
+	hr, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		"http://example.com/path?q=1", bytes.NewBufferString("hello"))
+	if err != nil {
+		t.Fatalf("could not build request: %s", err)
+	}
+	hr.Header.Set("User-Agent", "x")
+
+	if got, want := requestWireSize(hr, len("hello")), int64(24+19+15+2+5); got != want {
+		t.Errorf("requestWireSize = %d, want %d", got, want)
+	}
+}
+
+// "HTTP/1.1 200 OK\r\n" (17) + "Content-Length: 5\r\n" (19) + trailing CRLF (2)
+func TestResponseHeaderWireSize(t *testing.T) {
+	resp := &http.Response{
+		Proto:  "HTTP/1.1",
+		Status: "200 OK",
+		Header: http.Header{"Content-Length": []string{"5"}},
+	}
+	if got, want := responseHeaderWireSize(resp), int64(17+19+2); got != want {
+		t.Errorf("responseHeaderWireSize = %d, want %d", got, want)
+	}
+	if got := responseHeaderWireSize(nil); got != 0 {
+		t.Errorf("responseHeaderWireSize(nil) = %d, want 0", got)
 	}
 }
 

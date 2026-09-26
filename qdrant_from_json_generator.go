@@ -16,6 +16,11 @@ type QdrantFromJsonGenerator struct {
 	// logger etc
 }
 
+// PreparedRequests is the number of requests loaded from the json file.
+func (g *QdrantFromJsonGenerator) PreparedRequests() int {
+	return len(g.sourceRequests)
+}
+
 type QdrantQueryParamsQuantization struct {
 	Rescore      bool    `json:"rescore,omitempty"`
 	Oversampling float64 `json:"oversampling,omitempty"`
@@ -145,7 +150,6 @@ func NewQdrantFromJsonGenerator(sourceFilePath string) (*QdrantFromJsonGenerator
 		requestsQdrantFromJson = append(requestsQdrantFromJson, Request{AnyData: qdrantRequest})
 	}
 
-	fmt.Printf("%d loaded from %s\n", len(requestsQdrantFromJson), sourceFilePath)
 	return &QdrantFromJsonGenerator{
 		sourceRequests: requestsQdrantFromJson,
 	}, nil

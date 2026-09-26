@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -35,7 +36,7 @@ func NewQdrantRunner(threadNum int, wgReady *sync.WaitGroup, dsn string) *Qdrant
 	if err != nil {
 		fatal("could not create qdrant client%s\n", dsn)
 	}
-	fmt.Printf("thread %d is ready\n", threadNum)
+	fmt.Fprintf(os.Stderr, "thread %d is ready\n", threadNum)
 	return &QdrantRunner{
 		client:    client,
 		threadNum: threadNum,

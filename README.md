@@ -11,6 +11,7 @@ next steps:
 - [x] ability to make prepared requests from file
 - [x] latency count
     - [x] min/avg/max + p50/p75/p90/p95/p99/p99.9 for full response time, time to first byte, and response size
+    - [x] transfer speed sent/recv, live and in the final report
     - [x] online stats: streaming histogram, percentiles printed during the run
 - [ ] graphics and histograms
 - [x] unit tests
@@ -18,4 +19,6 @@ next steps:
 - [ ] better display formats
     - [x] in-place progress redraw on terminals
     - [x] online status counts in the progress block
+    - [x] three-section report: start params, live metrics table, final summary
+    - [x] progress bar for the remaining test time
 - [ ] performance tuning to be as good as wrk

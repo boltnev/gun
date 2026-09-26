@@ -18,6 +18,11 @@ type FromJsonGenerator struct {
 	// logger etc
 }
 
+// PreparedRequests is the number of requests loaded from the json file.
+func (g *FromJsonGenerator) PreparedRequests() int {
+	return len(g.sourceRequests)
+}
+
 func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJsonGenerator, error) {
 	requestsFromJson := Requests{}
 	sourceBytes, err := os.ReadFile(sourceFilePath)
@@ -28,7 +33,6 @@ func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJson
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("%d loaded from %s\n", len(requestsFromJson), sourceFilePath)
 	for i, req := range requestsFromJson {
 		urlCopy := *baseRequest.Url
 		requestsFromJson[i].Url = &urlCopy

@@ -59,15 +59,20 @@ func TestSimpleCollectorHttpPrintsLatencyStats(t *testing.T) {
 	wg.Wait()
 
 	for _, want := range []string{
-		"responses total: 4\n",
-		"http status stats: 0=1, 200=3\n",
-		"latency stats (3 responses): min 10ms; avg 20ms; max 30ms; p50 ",
-		"time to first byte stats (3 responses): min 5ms; avg 6ms; max 7ms; p50 ",
-		"response size stats in bytes (3 responses): min 100; avg 200; max 300; p50 ",
+		separator,
+		"  finished    ",
+		"  responses    4   rps ",
+		"  statuses     0=1, 200=3",
+		"time-to-response time-to-first-byte full-response-size",
+		"  sent         0B total   0B/s",
+		"  recv         600B total   ",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("collector output missing %q\ngot:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "running") {
+		t.Error("mid-run progress must not print without a terminal")
 	}
 }
 
@@ -77,10 +82,12 @@ func TestSimpleCollectorHttpCountsStatusesMidRun(t *testing.T) {
 	setLoadGlobals(t, LoadTypeHTTP, 1, time.Second)
 
 	results := make(chan Result, 2)
+	c := NewSimpleCollector()
+	c.interactive = true // force the redraw path under the test pipe
 	out := captureStdout(t, func() {
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
-		go NewSimpleCollector().Collect(context.Background(), wg, results)
+		go c.Collect(context.Background(), wg, results)
 
 		results <- Result{Latency: 10 * time.Millisecond, FirstByteLatency: 5 * time.Millisecond, SizeBytes: 100, StatusCode: 200}
 		time.Sleep(600 * time.Millisecond) // let the 500ms ticker fire
@@ -89,8 +96,17 @@ func TestSimpleCollectorHttpCountsStatusesMidRun(t *testing.T) {
 		wg.Wait()
 	})
 
-	if !strings.Contains(out, "statuses: 200=1, 500=1") {
+	if !strings.Contains(out, "200=1, 500=1") {
 		t.Errorf("mid-run output missing live status counts:\n%s", out)
+	}
+	if !strings.Contains(out, "░") {
+		t.Errorf("mid-run output missing the progress bar:\n%s", out)
+	}
+	if !strings.Contains(out, "transfer") {
+		t.Errorf("mid-run output missing live transfer speeds:\n%s", out)
+	}
+	if !strings.Contains(out, "\x1b[2K") {
+		t.Error("interactive redraw must use ANSI codes")
 	}
 }
 
@@ -124,12 +140,36 @@ func TestSimpleCollectorQdrantPrintsLatencyStatsOnly(t *testing.T) {
 	})
 	wg.Wait()
 
-	want := "latency stats (2 responses): min 10ms; avg 20ms; max 30ms; p50 "
-	if !strings.Contains(out, want) {
-		t.Errorf("collector output missing %q\ngot:\n%s", want, out)
+	for _, want := range []string{
+		"  points avg   ",
+		"time-to-response",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("collector output missing %q\ngot:\n%s", want, out)
+		}
 	}
-	if strings.Contains(out, "time to first byte") || strings.Contains(out, "response size") {
-		t.Errorf("qdrant output must not contain ttfb or size stats:\n%s", out)
+	if strings.Contains(out, "time-to-first-byte") || strings.Contains(out, "full-response-size") {
+		t.Errorf("qdrant output must not contain http-only metric columns:\n%s", out)
+	}
+}
+
+// A line wider than the terminal must be clipped, not wrapped: wrapping
+// would occupy a second physical row and break the redraw arithmetic.
+func TestTruncateLine(t *testing.T) {
+	cases := []struct {
+		line  string
+		width int
+		want  string
+	}{
+		{"  running    6.2s", 0, "  running    6.2s"}, // unknown width: unchanged
+		{"short", 80, "short"},
+		{"  running    6.2s   responses 1 204", 20, "  running    6.2s   "},
+		{"─" + strings.Repeat("─", 40), 10, strings.Repeat("─", 10)}, // rune-safe, not byte-safe
+	}
+	for _, c := range cases {
+		if got := truncateLine(c.line, c.width); got != c.want {
+			t.Errorf("truncateLine(%q, %d) = %q, want %q", c.line, c.width, got, c.want)
+		}
 	}
 }
 
@@ -151,7 +191,8 @@ func TestSimpleCollectorRedrawReplacesLinesInPlace(t *testing.T) {
 	}
 }
 
-// Without a terminal redraw appends plain lines and clearProgress is a no-op.
+// Without a terminal the progress block is skipped entirely: logs and pipes
+// only ever see the start and finish sections.
 func TestSimpleCollectorRedrawPlainWithoutTerminal(t *testing.T) {
 	s := &SimpleCollector{interactive: false}
 	out := captureStdout(t, func() {
@@ -160,11 +201,8 @@ func TestSimpleCollectorRedrawPlainWithoutTerminal(t *testing.T) {
 		s.clearProgress()
 	})
 
-	if want := "one\ntwo\nthree\n"; out != want {
-		t.Errorf("plain redraw output = %q, want %q", out, want)
-	}
-	if strings.Contains(out, "\x1b") {
-		t.Error("plain redraw must not emit ANSI codes")
+	if out != "" {
+		t.Errorf("plain redraw output = %q, want empty", out)
 	}
 }
 

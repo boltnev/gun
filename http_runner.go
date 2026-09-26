@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -66,11 +67,44 @@ func NewHttpRunner(threadNum int, wgReady *sync.WaitGroup) *HttpRunner {
 		MaxConnsPerHost:     concurrency,
 	}
 	client := http.Client{Transport: tr}
-	fmt.Printf("thread %d is ready\n", threadNum)
+	fmt.Fprintf(os.Stderr, "thread %d is ready\n", threadNum)
 	return &HttpRunner{
 		client:    &client,
 		threadNum: threadNum,
 	}
+}
+
+// requestWireSize estimates the HTTP/1.1 request size on the wire: request
+// line, Host, every header, and the body. Transfer accounting only — chunked
+// framing is not counted.
+func requestWireSize(hr *http.Request, bodyLen int) int64 {
+	size := int64(len(hr.Method) + 1 + len(hr.URL.RequestURI()) + 1 + len(hr.Proto) + 2)
+	host := hr.Host
+	if host == "" {
+		host = hr.URL.Host
+	}
+	size += int64(len("Host") + 2 + len(host) + 2)
+	for name, values := range hr.Header {
+		for _, value := range values {
+			size += int64(len(name) + 2 + len(value) + 2)
+		}
+	}
+	return size + 2 + int64(bodyLen) // trailing CRLF + body
+}
+
+// responseHeaderWireSize estimates the HTTP/1.1 response header size on the
+// wire: status line, every header, and the trailing CRLF.
+func responseHeaderWireSize(resp *http.Response) int64 {
+	if resp == nil {
+		return 0
+	}
+	size := int64(len(resp.Proto) + 1 + len(resp.Status) + 2)
+	for name, values := range resp.Header {
+		for _, value := range values {
+			size += int64(len(name) + 2 + len(value) + 2)
+		}
+	}
+	return size + 2
 }
 
 func (h *HttpRunner) Run(ctx context.Context, wgDone *sync.WaitGroup, requests <-chan *Request, results chan<- Result) {
@@ -93,6 +127,7 @@ out:
 		}
 		applyHeaders(httpReq, req)
 		applyCookies(httpReq, req)
+		sentBytes := requestWireSize(httpReq, len(req.Body))
 		start := time.Now()
 		response, err := h.client.Do(httpReq)
 		// client.Do returns once the response headers are received, which is
@@ -100,6 +135,7 @@ out:
 		firstByteLatency := time.Since(start)
 		statusCode := 0
 		var sizeBytes int64
+		recvHeaderBytes := responseHeaderWireSize(response)
 		if response != nil {
 			statusCode = response.StatusCode
 			if response.Body != nil {
@@ -113,6 +149,8 @@ out:
 			Latency:          latency,
 			FirstByteLatency: firstByteLatency,
 			SizeBytes:        sizeBytes,
+			SentBytes:        sentBytes,
+			RecvHeaderBytes:  recvHeaderBytes,
 			StatusCode:       statusCode,
 			err:              err,
 		}

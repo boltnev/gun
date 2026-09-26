@@ -9,6 +9,11 @@ type SimpleRequestGenerator struct {
 	// logger etc
 }
 
+// PreparedRequests is the single request template the generator loops over.
+func (gen *SimpleRequestGenerator) PreparedRequests() int {
+	return 1
+}
+
 func NewSimpleRequestGenerator(baseRequest Request) *SimpleRequestGenerator {
 	return &SimpleRequestGenerator{
 		baseRequest: baseRequest,

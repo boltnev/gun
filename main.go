@@ -117,6 +117,12 @@ type Result struct {
 	FirstByteLatency time.Duration
 	// SizeBytes is the response body size in bytes. HTTP runner only.
 	SizeBytes int64
+	// SentBytes estimates the request wire size (request line + headers +
+	// body) for transfer accounting. HTTP runner only.
+	SentBytes int64
+	// RecvHeaderBytes estimates the response header wire size; the response
+	// body is already counted in SizeBytes. HTTP runner only.
+	RecvHeaderBytes int64
 
 	StatusCode int
 	err        error
@@ -166,12 +172,6 @@ func main() {
 		fatal("not allowed load type: %s", loadType)
 	}
 
-	fmt.Printf("concurrency: %d\n", concurrency)
-	fmt.Printf("duration: %s\n", duration)
-	fmt.Printf("timeout: %s\n", timeout)
-	fmt.Printf("url: %s\n", initialUrlRaw)
-	fmt.Printf("load_type: %s\n", loadType)
-	fmt.Print("============")
 	var runners []Runner
 	var generator RequestGenerator
 	var collector Collector
@@ -199,6 +199,30 @@ func main() {
 			MaxDuration: timeout,
 		})
 	}
+
+	requestsDesc := "1 (single url, looped)"
+	if fromJson != "" {
+		if counter, ok := generator.(interface{ PreparedRequests() int }); ok {
+			requestsDesc = fmt.Sprintf("%d prepared from %s", counter.PreparedRequests(), fromJson)
+		}
+	}
+	burst := burstLimit
+	if burst == 0 {
+		burst = int(rateLimit)
+	}
+	for _, line := range startSectionLines(startSpec{
+		LoadType:    loadType,
+		Url:         initialUrlRaw,
+		Concurrency: concurrency,
+		Duration:    duration,
+		Timeout:     timeout,
+		Rate:        rateLimit,
+		Burst:       burst,
+		Requests:    requestsDesc,
+		Started:     time.Now(),
+	}) {
+		fmt.Println(line)
+	}
 	profiler = StartProfiler(cpuprofile, memprofile)
 	if memprofile != "" {
 		// mid-run heap snapshot: the pipeline is still under load, so
@@ -210,7 +234,7 @@ func main() {
 		}()
 	}
 	if maxproc > 0 {
-		fmt.Printf("max proc: %d\n", maxproc)
+		fmt.Fprintf(os.Stderr, "max proc: %d\n", maxproc)
 		runtime.GOMAXPROCS(maxproc)
 	}
 
@@ -278,16 +302,19 @@ func main() {
 	case <-ctx.Done():
 	}
 
-	fmt.Println("wrapping up")
+	fmt.Fprintln(os.Stderr, "wrapping up")
 	wgDone.Wait()
 	close(results)
 	wg.Wait()
 
 	profiler.Finalize()
-	if cpuprofile != "" {
-		fmt.Printf("cpu profile written to: %s\n", cpuprofile)
-	}
-	if memprofile != "" {
-		fmt.Printf("mem profile written to: %s\n", memprofile)
+	if cpuprofile != "" || memprofile != "" {
+		fmt.Println()
+		if cpuprofile != "" {
+			fmt.Println(kv("cpu profile", cpuprofile))
+		}
+		if memprofile != "" {
+			fmt.Println(kv("mem profile", memprofile))
+		}
 	}
 }
