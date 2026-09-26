@@ -20,7 +20,12 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 
 func writeTempFile(t *testing.T, content string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "requests.json")
+	return writeTempFileNamed(t, "requests.json", content)
+}
+
+func writeTempFileNamed(t *testing.T, name, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("could not write temp file: %s", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,20 @@ func setHeader(hr *http.Request, name, value string) {
 		return
 	}
 	hr.Header.Set(name, value)
+}
+
+// applyCookies appends the per-request cookie map to the Cookie header, on
+// top of anything -H flags or headers already set; names are sorted so the
+// header value is stable.
+func applyCookies(hr *http.Request, req *Request) {
+	names := make([]string, 0, len(req.Cookies))
+	for name := range req.Cookies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		hr.AddCookie(&http.Cookie{Name: name, Value: req.Cookies[name]})
+	}
 }
 
 type HttpRunner struct {
@@ -78,6 +93,7 @@ out:
 			log.Fatalf("could not create request: %s", err)
 		}
 		applyHeaders(httpReq, req)
+		applyCookies(httpReq, req)
 		start := time.Now()
 		response, err := h.client.Do(httpReq)
 		statusCode := 0

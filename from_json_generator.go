@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"mime"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 type FromJsonGenerator struct {
@@ -40,6 +43,17 @@ func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJson
 		if req.Path != "" {
 			requestsFromJson[i].Url.Path = req.Path
 		}
+		if req.BodyFile != "" {
+			if req.Body != "" {
+				return nil, fmt.Errorf("position %d: both body and body_file are set", i)
+			}
+			body, err := os.ReadFile(req.BodyFile)
+			if err != nil {
+				return nil, fmt.Errorf("position %d: could not read body_file %q: %s", i, req.BodyFile, err)
+			}
+			requestsFromJson[i].Body = string(body)
+		}
+		resolveContentType(&requestsFromJson[i])
 	}
 
 	return &FromJsonGenerator{
@@ -58,4 +72,33 @@ func (gen *FromJsonGenerator) GenerateRequests(ctx context.Context, requests cha
 			return
 		}
 	}
+}
+
+// resolveContentType materializes Content-Type into the per-request headers:
+// an explicit header wins, then the content_type field, then the body_file
+// extension.
+func resolveContentType(req *Request) {
+	if hasHeader(req.Headers, "Content-Type") {
+		return
+	}
+	contentType := req.ContentType
+	if contentType == "" && req.BodyFile != "" {
+		contentType = mime.TypeByExtension(filepath.Ext(req.BodyFile))
+	}
+	if contentType == "" {
+		return
+	}
+	if req.Headers == nil {
+		req.Headers = map[string]string{}
+	}
+	req.Headers["Content-Type"] = contentType
+}
+
+func hasHeader(headers map[string]string, name string) bool {
+	for n := range headers {
+		if strings.EqualFold(n, name) {
+			return true
+		}
+	}
+	return false
 }

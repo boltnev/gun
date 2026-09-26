@@ -92,9 +92,17 @@ type Request struct {
 	Host   string `json:"host,omitempty"`
 	Method string `json:"method,omitempty"`
 	Body   string `json:"body,omitempty"`
+	// BodyFile is read into Body at load time (working-dir-relative path);
+	// it cannot be combined with body
+	BodyFile string `json:"body_file,omitempty"`
 	// Headers override same-named -H flags; the default user agent only
 	// applies when neither sets one
 	Headers map[string]string `json:"headers,omitempty"`
+	// Cookies are appended to the Cookie header on top of -H flags and headers
+	Cookies map[string]string `json:"cookies,omitempty"`
+	// ContentType fills Content-Type when headers do not set it; with BodyFile
+	// it falls back to the file extension
+	ContentType string `json:"content_type,omitempty"`
 
 	MaxDuration time.Duration `json:"-"`
 	Url         *url.URL      `json:"-"`

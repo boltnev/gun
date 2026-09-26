@@ -1,0 +1,20 @@
+[
+  {
+    "method": "POST",
+    "path": "/documents",
+    "body_file": "examples/document.json",
+    "content_type": "application/json",
+    "cookies": {
+      "session": "MWYyZDY4YzY3YjNkNGUwNA=="
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/search",
+    "body_file": "examples/query.json",
+    "cookies": {
+      "session": "MWYyZDY4YzY3YjNkNGUwNA==",
+      "experiment": "variant-a"
+    }
+  }
+]

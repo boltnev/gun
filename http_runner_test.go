@@ -251,6 +251,53 @@ func TestHttpRunnerAppliesCliAndRequestHeaders(t *testing.T) {
 	}
 }
 
+func TestHttpRunnerSendsCookies(t *testing.T) {
+	var mu sync.Mutex
+	var cookie string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		cookie = r.Header.Get("Cookie")
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	setLoadGlobals(t, LoadTypeHTTP, 1, 5*time.Second)
+
+	requests := make(chan *Request, 1)
+	results := make(chan Result, 1)
+	requests <- &Request{
+		Url:    mustParseURL(t, srv.URL),
+		Method: http.MethodGet,
+		Headers: map[string]string{
+			"Cookie": "static=1",
+		},
+		Cookies: map[string]string{
+			"session":    "abc123",
+			"experiment": "variant-a",
+		},
+	}
+	close(requests)
+
+	runner := newTestRunner(t)
+	wgDone := &sync.WaitGroup{}
+	wgDone.Add(1)
+	runner.Run(context.Background(), wgDone, requests, results)
+	wgDone.Wait()
+
+	if res := <-results; res.err != nil {
+		t.Errorf("unexpected error: %s", res.err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	// cookies from the map are appended after the Cookie header, sorted by name
+	want := "static=1; experiment=variant-a; session=abc123"
+	if cookie != want {
+		t.Errorf("cookie = %q, want %q", cookie, want)
+	}
+}
+
 func TestHttpRunnerProcessesAllRequestsFromChannel(t *testing.T) {
 	var mu sync.Mutex
 	pathsServed := 0
