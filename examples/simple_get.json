@@ -1,0 +1,18 @@
+[
+  {
+    "method": "GET",
+    "path": "/"
+  },
+  {
+    "method": "GET",
+    "path": "/api/items"
+  },
+  {
+    "method": "GET",
+    "path": "/api/items/42"
+  },
+  {
+    "method": "GET",
+    "path": "/no-such-page"
+  }
+]

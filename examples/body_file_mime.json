@@ -1,0 +1,12 @@
+[
+  {
+    "method": "POST",
+    "path": "/ingest/json",
+    "body_file": "examples/document.json"
+  },
+  {
+    "method": "POST",
+    "path": "/ingest/xml",
+    "body_file": "examples/feed.xml"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/items"
+  },
+  {
+    "method": "POST",
+    "path": "/api/items",
+    "body": "{\"name\":\"item\"}",
+    "content_type": "application/json"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/items/42",
+    "body": "{\"name\":\"renamed\"}",
+    "content_type": "application/json"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/items/42"
+  }
+]

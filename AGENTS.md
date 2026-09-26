@@ -2,13 +2,13 @@
 
 ## What this is
 
-`gun` — a wrk-like load-testing tool (single Go binary) that can drive plain HTTP traffic or Qdrant vector-search queries. `README.md` is not docs; it is a roadmap checklist — tick items off there when a feature is done.
+`gun` — a wrk-like load-testing tool (single Go binary) that can drive plain HTTP traffic or Qdrant vector-search queries. `README.md` documents the tool (features, flags, output format, examples); `TODO.md` is the roadmap checklist — tick items off there when a feature is done.
 
 ## Layout
 
 - Repo root is `package main` (no `cmd/`/`internal/`): all app source files live at the root.
 - `bench/` — separate `bench` package with **cgo** (clock_gettime benchmarks, `clock_test.go`). Not part of the binary; needs a C compiler; run its tests with `go test ./bench`.
-- `examples/payload.json` (HTTP), `examples/payload_body_file.json` (HTTP, body from files + cookies) and `examples/qdrant_payload.json` (Qdrant) — sample inputs for the `-from_json` flag.
+- `examples/` — sample inputs for the `-from_json` flag: `simple_get.json` (GET mix with a 404), `methods.json` (GET/POST/PUT/DELETE with json bodies), `payload_headers.json` (per-request headers), `payload_body_file.json` (bodies from files + cookies), `body_file_mime.json` (content-type by file extension; body files `document.json`, `query.json`, `feed.xml`), `url_override.json` (per-request absolute url + Host header), `payload.json` (large real-world POST set), `qdrant_payload.json` (qdrant mode). `body_file` paths are working-dir-relative — run gun from the repo root.
 
 ## Commands
 
