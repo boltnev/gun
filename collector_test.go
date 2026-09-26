@@ -60,13 +60,50 @@ func TestSimpleCollectorHttpPrintsLatencyStats(t *testing.T) {
 
 	for _, want := range []string{
 		"responses total: 4\n",
-		"latency stats (3 responses): min 10ms; avg 20ms; max 30ms; p50 20ms; p75 25ms; p90 28ms; p95 29ms; p99 29.8ms; p99.9 29.98ms\n",
-		"time to first byte stats (3 responses): min 5ms; avg 6ms; max 7ms; p50 6ms; p75 6.5ms; p90 6.8ms; p95 6.9ms; p99 6.98ms; p99.9 6.998ms\n",
-		"response size stats in bytes (3 responses): min 100; avg 200; max 300; p50 200; p75 250; p90 280; p95 290; p99 298; p99.9 300\n",
+		"http status stats: 0=1, 200=3\n",
+		"latency stats (3 responses): min 10ms; avg 20ms; max 30ms; p50 ",
+		"time to first byte stats (3 responses): min 5ms; avg 6ms; max 7ms; p50 ",
+		"response size stats in bytes (3 responses): min 100; avg 200; max 300; p50 ",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("collector output missing %q\ngot:\n%s", want, out)
 		}
+	}
+}
+
+// The ticker block carries the live status counts: the second result arrives
+// after the 500ms tick, so the progress redraw must already include it.
+func TestSimpleCollectorHttpCountsStatusesMidRun(t *testing.T) {
+	setLoadGlobals(t, LoadTypeHTTP, 1, time.Second)
+
+	results := make(chan Result, 2)
+	out := captureStdout(t, func() {
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go NewSimpleCollector().Collect(context.Background(), wg, results)
+
+		results <- Result{Latency: 10 * time.Millisecond, FirstByteLatency: 5 * time.Millisecond, SizeBytes: 100, StatusCode: 200}
+		time.Sleep(600 * time.Millisecond) // let the 500ms ticker fire
+		results <- Result{Latency: 20 * time.Millisecond, FirstByteLatency: 6 * time.Millisecond, SizeBytes: 200, StatusCode: 500}
+		close(results)
+		wg.Wait()
+	})
+
+	if !strings.Contains(out, "statuses: 200=1, 500=1") {
+		t.Errorf("mid-run output missing live status counts:\n%s", out)
+	}
+}
+
+func TestStatusCountsSortedAndDeterministic(t *testing.T) {
+	got := statusCounts(map[int]int{500: 1, 200: 2, 0: 3})
+	if want := "0=3, 200=2, 500=1"; got != want {
+		t.Errorf("statusCounts = %q, want %q", got, want)
+	}
+}
+
+func TestStatusCountsEmpty(t *testing.T) {
+	if got := statusCounts(map[int]int{}); got != "(none)" {
+		t.Errorf("statusCounts on empty map = %q, want %q", got, "(none)")
 	}
 }
 
@@ -87,12 +124,47 @@ func TestSimpleCollectorQdrantPrintsLatencyStatsOnly(t *testing.T) {
 	})
 	wg.Wait()
 
-	want := "latency stats (2 responses): min 10ms; avg 20ms; max 30ms; p50 20ms; p75 25ms; p90 28ms; p95 29ms; p99 29.8ms; p99.9 29.98ms\n"
+	want := "latency stats (2 responses): min 10ms; avg 20ms; max 30ms; p50 "
 	if !strings.Contains(out, want) {
 		t.Errorf("collector output missing %q\ngot:\n%s", want, out)
 	}
 	if strings.Contains(out, "time to first byte") || strings.Contains(out, "response size") {
 		t.Errorf("qdrant output must not contain ttfb or size stats:\n%s", out)
+	}
+}
+
+// In interactive mode redraw moves the cursor up over the previous block,
+// clears each line, and shrinks leftovers; clearProgress erases the block.
+func TestSimpleCollectorRedrawReplacesLinesInPlace(t *testing.T) {
+	s := &SimpleCollector{interactive: true}
+	out := captureStdout(t, func() {
+		s.redraw([]string{"one", "two"})
+		s.redraw([]string{"three"})
+		s.clearProgress()
+	})
+
+	want := "\x1b[2Kone\n\x1b[2Ktwo\n\x1b[J" + // first draw: two cleared lines, erase below
+		"\x1b[2A\x1b[2Kthree\n\x1b[J" + // redraw: up two lines, one line, erase the old second line
+		"\x1b[1A\x1b[J" // clear: up one line, erase the block
+	if out != want {
+		t.Errorf("redraw output = %q, want %q", out, want)
+	}
+}
+
+// Without a terminal redraw appends plain lines and clearProgress is a no-op.
+func TestSimpleCollectorRedrawPlainWithoutTerminal(t *testing.T) {
+	s := &SimpleCollector{interactive: false}
+	out := captureStdout(t, func() {
+		s.redraw([]string{"one", "two"})
+		s.redraw([]string{"three"})
+		s.clearProgress()
+	})
+
+	if want := "one\ntwo\nthree\n"; out != want {
+		t.Errorf("plain redraw output = %q, want %q", out, want)
+	}
+	if strings.Contains(out, "\x1b") {
+		t.Error("plain redraw must not emit ANSI codes")
 	}
 }
 

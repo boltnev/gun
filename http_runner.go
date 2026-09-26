@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -81,7 +80,7 @@ out:
 	for req := range requests {
 		reqCtx, cancel := context.WithTimeout(ctx, timeout)
 		if req.Url == nil {
-			log.Fatalf("wrong request without url: %s", req.UrlRaw)
+			fatal("wrong request without url: %s", req.UrlRaw)
 		}
 		httpReq, err := http.NewRequestWithContext(
 			reqCtx,
@@ -90,7 +89,7 @@ out:
 			bytes.NewBuffer([]byte(req.Body)),
 		)
 		if err != nil {
-			log.Fatalf("could not create request: %s", err)
+			fatal("could not create request: %s", err)
 		}
 		applyHeaders(httpReq, req)
 		applyCookies(httpReq, req)

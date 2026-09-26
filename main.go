@@ -4,13 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
-	"runtime/pprof"
 	"strings"
 	"sync"
 	"syscall"
@@ -147,13 +145,13 @@ func main() {
 	var err error
 	initialUrl, err = url.Parse(initialUrlRaw)
 	if err != nil {
-		log.Fatalf("bad url: %s", initialUrl)
+		fatal("bad url: %s", initialUrl)
 	}
 	for _, raw := range cliHeaderFlags {
 		name, value, found := strings.Cut(raw, ":")
 		name = strings.TrimSpace(name)
 		if !found || name == "" {
-			log.Fatalf("wrong header %q: want \"Name: value\"", raw)
+			fatal("wrong header %q: want \"Name: value\"", raw)
 		}
 		cliHeaders = append(cliHeaders, [2]string{name, strings.TrimSpace(value)})
 	}
@@ -165,7 +163,7 @@ func main() {
 		}
 	}
 	if notAllowed {
-		log.Fatalf("not allowed load type: %s", loadType)
+		fatal("not allowed load type: %s", loadType)
 	}
 
 	fmt.Printf("concurrency: %d\n", concurrency)
@@ -189,10 +187,10 @@ func main() {
 		case LoadTypeQdrant:
 			generator, err = NewQdrantFromJsonGenerator(fromJson)
 		default:
-			log.Fatalf("error on load generator select: unknown load type: %s\n", loadType)
+			fatal("error on load generator select: unknown load type: %s\n", loadType)
 		}
 		if err != nil {
-			log.Fatalf("could not create requests from json: %s\n", err)
+			fatal("could not create requests from json: %s\n", err)
 		}
 	} else {
 		generator = NewSimpleRequestGenerator(Request{
@@ -201,24 +199,14 @@ func main() {
 			MaxDuration: timeout,
 		})
 	}
-	if cpuprofile != "" {
-		f, err := os.Create(cpuprofile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
+	profiler = StartProfiler(cpuprofile, memprofile)
 	if memprofile != "" {
+		// mid-run heap snapshot: the pipeline is still under load, so
+		// in-flight allocations are visible (the exit snapshot comes after
+		// wind-down)
 		go func() {
 			time.Sleep(duration / 2)
-			fmt.Println("writing memprofile")
-			f, err := os.Create(memprofile)
-			if err != nil {
-				log.Fatal(err)
-			}
-			pprof.WriteHeapProfile(f)
-
+			profiler.WriteMemProfile()
 		}()
 	}
 	if maxproc > 0 {
@@ -244,7 +232,7 @@ func main() {
 		case LoadTypeQdrant:
 			runners = append(runners, NewQdrantRunner(threadNum, &wg, initialUrlRaw))
 		default:
-			log.Fatalf("error on load runner select: unknown load type: %s\n", loadType)
+			fatal("error on load runner select: unknown load type: %s\n", loadType)
 		}
 	}
 	wg.Wait()
@@ -294,4 +282,12 @@ func main() {
 	wgDone.Wait()
 	close(results)
 	wg.Wait()
+
+	profiler.Finalize()
+	if cpuprofile != "" {
+		fmt.Printf("cpu profile written to: %s\n", cpuprofile)
+	}
+	if memprofile != "" {
+		fmt.Printf("mem profile written to: %s\n", memprofile)
+	}
 }

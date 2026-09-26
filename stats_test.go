@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,7 +27,10 @@ func TestSamplesMinAvgMax(t *testing.T) {
 	}
 }
 
-func TestSamplesPercentileInterpolates(t *testing.T) {
+// Percentiles are nearest-rank over the histogram, so for 1..10ms the
+// expected value is the rank-th sample itself; the bucket representative may
+// deviate by half a bucket width (~0.12%).
+func TestSamplesPercentileNearestRank(t *testing.T) {
 	var s Samples
 	for i := 1; i <= 10; i++ {
 		s.Observe(int64(time.Duration(i) * time.Millisecond))
@@ -37,19 +41,19 @@ func TestSamplesPercentileInterpolates(t *testing.T) {
 		want float64 // in milliseconds
 	}{
 		{0, 1},
-		{25, 3.25},
-		{50, 5.5},
-		{75, 7.75},
-		{90, 9.1},
-		{95, 9.55},
-		{99, 9.91},
-		{99.9, 9.991},
+		{25, 3},
+		{50, 5},
+		{75, 8},
+		{90, 9},
+		{95, 10},
+		{99, 10},
+		{99.9, 10},
 		{100, 10},
 	}
 	for _, c := range cases {
 		got := s.Percentile(c.p) / float64(time.Millisecond)
-		if math.Abs(got-c.want) > 1e-9 {
-			t.Errorf("percentile(%v) = %vms, want %vms", c.p, got, c.want)
+		if math.Abs(got-c.want) > c.want*0.005 {
+			t.Errorf("percentile(%v) = %vms, want %vms ±0.5%%", c.p, got, c.want)
 		}
 	}
 
@@ -61,14 +65,55 @@ func TestSamplesPercentileInterpolates(t *testing.T) {
 	}
 }
 
+// With enough samples the nearest-rank answer is tight: on 1..1000ms the
+// p50/p99/p99.9 ranks are 500/990/999, and the bucket representative must
+// stay within half a percent of those.
+func TestSamplesPercentileOnLargeSample(t *testing.T) {
+	var s Samples
+	for i := 1; i <= 1000; i++ {
+		s.Observe(int64(time.Duration(i) * time.Millisecond))
+	}
+
+	cases := []struct {
+		p    float64
+		want float64 // in milliseconds
+	}{
+		{50, 500},
+		{99, 990},
+		{99.9, 999},
+	}
+	for _, c := range cases {
+		got := s.Percentile(c.p) / float64(time.Millisecond)
+		if math.Abs(got-c.want) > c.want*0.005 {
+			t.Errorf("percentile(%v) = %vms, want %vms ±0.5%%", c.p, got, c.want)
+		}
+	}
+}
+
+func TestSamplesPercentilesAreMonotonic(t *testing.T) {
+	var s Samples
+	for i := 1; i <= 101; i++ {
+		s.Observe(int64(i) * 7919)
+	}
+
+	prev := s.Percentile(0)
+	for _, p := range []float64{10, 25, 50, 75, 90, 95, 99, 99.9, 100} {
+		cur := s.Percentile(p)
+		if cur < prev {
+			t.Fatalf("percentile(%v) = %v, less than percentile below it (%v)", p, cur, prev)
+		}
+		prev = cur
+	}
+}
+
 func TestSamplesSingleValue(t *testing.T) {
 	var s Samples
 	s.Observe(int64(7 * time.Millisecond))
 
 	want := float64(7 * time.Millisecond)
 	for _, p := range []float64{0, 50, 99.9, 100} {
-		if got := s.Percentile(p); got != want {
-			t.Errorf("percentile(%v) = %f, want %f", p, got, want)
+		if got := s.Percentile(p); math.Abs(got-want) > want*0.005 {
+			t.Errorf("percentile(%v) = %s, want %s ±0.5%%", p, time.Duration(got), time.Duration(want))
 		}
 	}
 	if s.Min() != int64(want) || s.Max() != int64(want) || s.Avg() != want {
@@ -90,16 +135,31 @@ func TestSamplesEmpty(t *testing.T) {
 	}
 }
 
-func TestSamplesObserveAfterQueryResorts(t *testing.T) {
+// Zero goes to its own bucket, and values beyond the 10^13 range clamp to the
+// top bucket instead of overflowing the index.
+func TestSamplesZeroAndHugeValues(t *testing.T) {
 	var s Samples
-	s.Observe(int64(30 * time.Millisecond))
-	if s.Max() != int64(30*time.Millisecond) {
-		t.Errorf("max = %s, want 30ms", time.Duration(s.Max()))
-	}
+	s.Observe(0)
+	s.Observe(1)
+	s.Observe(int64(1e15))
 
-	s.Observe(int64(10 * time.Millisecond))
-	if s.Min() != int64(10*time.Millisecond) {
-		t.Errorf("min after new sample = %s, want 10ms", time.Duration(s.Min()))
+	if got := s.Count(); got != 3 {
+		t.Fatalf("count = %d, want 3", got)
+	}
+	if s.Min() != 0 {
+		t.Errorf("min = %d, want 0", s.Min())
+	}
+	if s.Max() != int64(1e15) {
+		t.Errorf("max = %d, want 1e15", s.Max())
+	}
+	// p50 is the 2nd of [0, 1, 1e15] → ~1
+	if got := s.Percentile(50); math.Abs(got-1) > 0.01 {
+		t.Errorf("percentile(50) = %f, want ~1", got)
+	}
+	// p100 is the 1e15 sample: the index clamps to the top bucket, whose
+	// representative sits just under 10^13
+	if got := s.Percentile(100); got < 9.9e12 || got > 1e13 {
+		t.Errorf("percentile(100) = %f, want the top bucket just under 1e13", got)
 	}
 }
 
@@ -109,9 +169,16 @@ func TestDurationStatsLine(t *testing.T) {
 		s.Observe(int64(d))
 	}
 
-	want := "min 10ms; avg 20ms; max 30ms; p50 20ms; p75 25ms; p90 28ms; p95 29ms; p99 29.8ms; p99.9 29.98ms"
-	if got := DurationStatsLine(&s); got != want {
-		t.Errorf("duration stats line = %q, want %q", got, want)
+	// min/avg/max are exact; percentile values are bucket representatives,
+	// so only the shape of the line is asserted here
+	got := DurationStatsLine(&s)
+	if prefix := "min 10ms; avg 20ms; max 30ms; p50 "; !strings.HasPrefix(got, prefix) {
+		t.Errorf("duration stats line = %q, want prefix %q", got, prefix)
+	}
+	for _, label := range []string{"; p75 ", "; p90 ", "; p95 ", "; p99 ", "; p99.9"} {
+		if !strings.Contains(got, label) {
+			t.Errorf("duration stats line = %q, missing %q", got, label)
+		}
 	}
 }
 
@@ -121,8 +188,13 @@ func TestSizeStatsLine(t *testing.T) {
 		s.Observe(v)
 	}
 
-	want := "min 100; avg 200; max 300; p50 200; p75 250; p90 280; p95 290; p99 298; p99.9 300"
-	if got := SizeStatsLine(&s); got != want {
-		t.Errorf("size stats line = %q, want %q", got, want)
+	got := SizeStatsLine(&s)
+	if prefix := "min 100; avg 200; max 300; p50 "; !strings.HasPrefix(got, prefix) {
+		t.Errorf("size stats line = %q, want prefix %q", got, prefix)
+	}
+	for _, label := range []string{"; p75 ", "; p90 ", "; p95 ", "; p99 ", "; p99.9"} {
+		if !strings.Contains(got, label) {
+			t.Errorf("size stats line = %q, missing %q", got, label)
+		}
 	}
 }

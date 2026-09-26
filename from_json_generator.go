@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"mime"
 	"net/url"
@@ -36,7 +35,7 @@ func NewFromJsonGenerator(baseRequest Request, sourceFilePath string) (*FromJson
 		if req.UrlRaw != "" {
 			url, err := url.Parse(req.UrlRaw)
 			if err != nil {
-				log.Fatalf("wrong url from json file: position %d, %s", i, req.UrlRaw)
+				fatal("wrong url from json file: position %d, %s", i, req.UrlRaw)
 			}
 			requestsFromJson[i].Url = url
 		}

@@ -11,8 +11,11 @@ next steps:
 - [x] ability to make prepared requests from file
 - [x] latency count
     - [x] min/avg/max + p50/p75/p90/p95/p99/p99.9 for full response time, time to first byte, and response size
+    - [x] online stats: streaming histogram, percentiles printed during the run
 - [ ] graphics and histograms
 - [x] unit tests
 - [x] user agent option
 - [ ] better display formats
+    - [x] in-place progress redraw on terminals
+    - [x] online status counts in the progress block
 - [ ] performance tuning to be as good as wrk

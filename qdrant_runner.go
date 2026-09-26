@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/url"
 	"strconv"
 	"sync"
@@ -21,12 +20,12 @@ func NewQdrantRunner(threadNum int, wgReady *sync.WaitGroup, dsn string) *Qdrant
 	defer wgReady.Done()
 	url, err := url.Parse(dsn)
 	if err != nil {
-		log.Fatalf("wrong dsn format %s\n", dsn)
+		fatal("wrong dsn format %s\n", dsn)
 	}
 
 	port, err := strconv.Atoi(url.Port())
 	if err != nil {
-		log.Fatalf("wrong port %s\n", dsn)
+		fatal("wrong port %s\n", dsn)
 	}
 
 	client, err := qdrant.NewClient(&qdrant.Config{
@@ -34,7 +33,7 @@ func NewQdrantRunner(threadNum int, wgReady *sync.WaitGroup, dsn string) *Qdrant
 		Port: port,
 	})
 	if err != nil {
-		log.Fatalf("could not create qdrant client%s\n", dsn)
+		fatal("could not create qdrant client%s\n", dsn)
 	}
 	fmt.Printf("thread %d is ready\n", threadNum)
 	return &QdrantRunner{
@@ -62,7 +61,7 @@ func (h *QdrantRunner) Run(ctx context.Context, wgDone *sync.WaitGroup, requests
 				AnyData: points,
 			}
 		default:
-			log.Fatalf("internal error: wrong request data type %T\n", q)
+			fatal("internal error: wrong request data type %T\n", q)
 		}
 		select {
 		case <-ctx.Done():
