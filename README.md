@@ -156,3 +156,7 @@ Mode limitations: unary requests only (no streaming), headers and cookies are no
 - Tests: `go test .` (root package), `go test ./bench` (cgo clock_gettime benchmarks, needs a C compiler).
 - Checks: `gofmt`, `go vet ./...`.
 - Roadmap: [TODO.md](TODO.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
