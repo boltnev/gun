@@ -9,12 +9,10 @@ next steps:
     - [x] cookies
     - [x] format for body from file
 - [x] ability to make prepared requests from file
-    - [ ] requests nicer format(protobuf,for example)
-- [ ] performance tuning to be as good as wrk
-- [ ] latency count
+- [x] latency count
+    - [x] min/avg/max + p50/p75/p90/p95/p99/p99.9 for full response time, time to first byte, and response size
+- [ ] graphics and histograms
 - [x] unit tests
-- [ ] better app name
-- [ ] better display formats
 - [x] user agent option
-- [ ] cluster(i.e. several ips)
-- [ ] histograms
+- [ ] better display formats
+- [ ] performance tuning to be as good as wrk

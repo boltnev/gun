@@ -25,6 +25,12 @@ func (s *SimpleCollector) Collect(ctx context.Context, wg *sync.WaitGroup, resul
 	statusMap := make(map[int]int)
 	errsCount := 0
 
+	// percentile stats over successful responses only; TTFB and response
+	// size are recorded by the HTTP runner, so they stay empty in qdrant mode
+	var latencies Samples
+	var firstByteLatencies Samples
+	var sizes Samples
+
 	// TODO: refactor qdrant stuff
 	pointsFound := 0
 	maxScore := float64(0)
@@ -41,6 +47,12 @@ out:
 		statusMap[result.StatusCode]++
 		if result.err != nil {
 			errsCount++
+		} else {
+			latencies.Observe(int64(result.Latency))
+			if loadType == LoadTypeHTTP {
+				firstByteLatencies.Observe(int64(result.FirstByteLatency))
+				sizes.Observe(result.SizeBytes)
+			}
 		}
 		switch data := result.AnyData.(type) {
 		case []*qdrant.ScoredPoint:
@@ -89,10 +101,9 @@ out:
 	case LoadTypeQdrant:
 		fmt.Printf("qdrant status request errors %d:\n", errsCount)
 		if totalResponses > 0 {
-			fmt.Printf("responses total: %d; avg rps: %f; avg duration %s; avg points count: %f; avg max score: %f\n",
+			fmt.Printf("responses total: %d; avg rps: %f; avg points count: %f; avg max score: %f\n",
 				totalResponses,
 				float64(totalResponses)/time.Since(testStart).Seconds(),
-				totalDuration/time.Duration(totalResponses),
 				float64(pointsFound)/float64(totalResponses),
 				float64(maxScore)/float64(totalResponses),
 			)
@@ -100,7 +111,15 @@ out:
 	default:
 	}
 	fmt.Printf("avg rps: %f\n", float64(totalResponses)/time.Since(testStart).Seconds())
-	if totalResponses > 0 {
-		fmt.Printf("avg duration: %s\n", totalDuration/time.Duration(totalResponses))
+	if latencies.Count() > 0 {
+		fmt.Printf("latency stats (%d responses): %s\n", latencies.Count(), DurationStatsLine(&latencies))
+	} else {
+		fmt.Printf("latency stats: no successful responses\n")
+	}
+	if firstByteLatencies.Count() > 0 {
+		fmt.Printf("time to first byte stats (%d responses): %s\n", firstByteLatencies.Count(), DurationStatsLine(&firstByteLatencies))
+	}
+	if sizes.Count() > 0 {
+		fmt.Printf("response size stats in bytes (%d responses): %s\n", sizes.Count(), SizeStatsLine(&sizes))
 	}
 }

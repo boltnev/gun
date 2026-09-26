@@ -112,7 +112,14 @@ type Request struct {
 type Requests = []Request
 
 type Result struct {
-	Latency    time.Duration
+	// Latency is the full round trip: request sent to response body drained.
+	Latency time.Duration
+	// FirstByteLatency is the time to first byte: the moment the response
+	// headers arrive (client.Do returns). HTTP runner only.
+	FirstByteLatency time.Duration
+	// SizeBytes is the response body size in bytes. HTTP runner only.
+	SizeBytes int64
+
 	StatusCode int
 	err        error
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -68,6 +69,51 @@ func TestHttpRunnerSendsRequestAndCollectsResult(t *testing.T) {
 	want := serverCall{method: http.MethodPost, path: "/api/echo", body: `{"value":42}`}
 	if calls[0] != want {
 		t.Errorf("server saw %+v, want %+v", calls[0], want)
+	}
+}
+
+func TestHttpRunnerRecordsFirstByteLatencyAndSize(t *testing.T) {
+	body := strings.Repeat("x", 1234)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(30 * time.Millisecond)
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	setLoadGlobals(t, LoadTypeHTTP, 1, 5*time.Second)
+
+	requests := make(chan *Request, 1)
+	results := make(chan Result, 1)
+	requests <- &Request{Url: mustParseURL(t, srv.URL), Method: http.MethodGet}
+	close(requests)
+
+	runner := newTestRunner(t)
+	wgDone := &sync.WaitGroup{}
+	wgDone.Add(1)
+	runner.Run(context.Background(), wgDone, requests, results)
+	wgDone.Wait()
+
+	res := <-results
+	if res.err != nil {
+		t.Fatalf("unexpected error: %s", res.err)
+	}
+	if res.SizeBytes != int64(len(body)) {
+		t.Errorf("size = %d, want %d", res.SizeBytes, len(body))
+	}
+	if res.FirstByteLatency <= 0 || res.Latency <= 0 {
+		t.Errorf("first byte latency = %s, latency = %s, want positive", res.FirstByteLatency, res.Latency)
+	}
+	if res.FirstByteLatency > res.Latency {
+		t.Errorf("first byte latency = %s, want <= latency %s", res.FirstByteLatency, res.Latency)
+	}
+	// headers are flushed 30ms before the body, so a real gap proves the
+	// first byte latency is captured at the headers, not after the body
+	if gap := res.Latency - res.FirstByteLatency; gap < 10*time.Millisecond {
+		t.Errorf("latency - first byte latency = %s, want >= 10ms (body delayed by 30ms)", gap)
 	}
 }
 

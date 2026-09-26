@@ -96,20 +96,26 @@ out:
 		applyCookies(httpReq, req)
 		start := time.Now()
 		response, err := h.client.Do(httpReq)
+		// client.Do returns once the response headers are received, which is
+		// the first byte of the response on the wire.
+		firstByteLatency := time.Since(start)
 		statusCode := 0
+		var sizeBytes int64
 		if response != nil {
 			statusCode = response.StatusCode
 			if response.Body != nil {
-				io.Copy(io.Discard, response.Body)
+				sizeBytes, _ = io.Copy(io.Discard, response.Body)
 				response.Body.Close()
 			}
 		}
 		latency := time.Since(start)
 		cancel()
 		results <- Result{
-			Latency:    latency,
-			StatusCode: statusCode,
-			err:        err,
+			Latency:          latency,
+			FirstByteLatency: firstByteLatency,
+			SizeBytes:        sizeBytes,
+			StatusCode:       statusCode,
+			err:              err,
 		}
 		select {
 		case <-ctx.Done():
